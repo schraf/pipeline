@@ -26,7 +26,7 @@ import (
 )
 
 func main() {
-    p, ctx := pipeline.WithPipeline(context.Background())
+    p, _ := pipeline.WithPipeline(context.Background())
 
     in := make(chan int, 10)
     out := make(chan int, 10)
@@ -40,7 +40,7 @@ func main() {
     }()
 
     // Transform: multiply by 2
-    pipeline.Transform(p, func(x int) (*int, error) {
+    pipeline.Transform(p, func(ctx context.Context, x int) (*int, error) {
         result := x * 2
         return &result, nil
     }, in, out)
@@ -64,7 +64,7 @@ func main() {
 Applies a transformation function to each value:
 
 ```go
-pipeline.Transform(p, func(x int) (*int, error) {
+pipeline.Transform(p, func(ctx context.Context, x int) (*int, error) {
     result := x * 2
     return &result, nil
 }, in, out)
@@ -75,7 +75,7 @@ pipeline.Transform(p, func(x int) (*int, error) {
 Filters values based on a predicate:
 
 ```go
-pipeline.Filter(p, func(x int) (bool, error) {
+pipeline.Filter(p, func(ctx context.Context, x int) (bool, error) {
     return x%2 == 0, nil
 }, in, out)
 ```
@@ -85,7 +85,7 @@ pipeline.Filter(p, func(x int) (bool, error) {
 Groups values into fixed-size batches:
 
 ```go
-pipeline.Batch(p, func(batch []int) (*int, error) {
+pipeline.Batch(p, func(ctx context.Context, batch []int) (*int, error) {
     sum := 0
     for _, v := range batch {
         sum += v
@@ -99,7 +99,7 @@ pipeline.Batch(p, func(batch []int) (*int, error) {
 Applies transformation with concurrent workers:
 
 ```go
-pipeline.ParallelTransform(p, 5, func(x int) (*int, error) {
+pipeline.ParallelTransform(p, 5, func(ctx context.Context, x int) (*int, error) {
     result := x * 2
     return &result, nil
 }, in, out)
@@ -142,7 +142,7 @@ pipeline.Limit(p, 10, in, out)
 Routes values to different channels based on a selector:
 
 ```go
-pipeline.Split(p, func(x int) int {
+pipeline.Split(p, func(ctx context.Context, x int) int {
     return (x - 1) % 3
 }, in, out1, out2, out3)
 ```

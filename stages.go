@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
 
 	"golang.org/x/sync/errgroup"
@@ -10,7 +11,7 @@ import (
 // function, and forwards successful results to the output channel until the
 // context is done or the input channel is closed. The transformer must return
 // a non-nil pointer when err is nil, otherwise a panic will occur.
-func Transform[In any, Out any](p *Pipeline, transformer func(In) (*Out, error), in <-chan In, out chan<- Out) {
+func Transform[In any, Out any](p *Pipeline, transformer func(context.Context, In) (*Out, error), in <-chan In, out chan<- Out) {
 	p.group.Add(1)
 
 	go func() {
@@ -18,7 +19,7 @@ func Transform[In any, Out any](p *Pipeline, transformer func(In) (*Out, error),
 		defer p.group.Done()
 
 		for input := range in {
-			output, err := transformer(input)
+			output, err := transformer(p.ctx, input)
 			if err != nil {
 				p.setError(err)
 				return
@@ -40,7 +41,7 @@ func Transform[In any, Out any](p *Pipeline, transformer func(In) (*Out, error),
 // Filter reads values from the input channel, applies the filter predicate,
 // and forwards only values that satisfy the predicate to the output channel.
 // It respects context cancellation and stops processing on error.
-func Filter[T any](p *Pipeline, filter func(T) (bool, error), in <-chan T, out chan<- T) {
+func Filter[T any](p *Pipeline, filter func(context.Context, T) (bool, error), in <-chan T, out chan<- T) {
 	p.group.Add(1)
 
 	go func() {
@@ -48,7 +49,7 @@ func Filter[T any](p *Pipeline, filter func(T) (bool, error), in <-chan T, out c
 		defer p.group.Done()
 
 		for input := range in {
-			shouldForward, err := filter(input)
+			shouldForward, err := filter(p.ctx, input)
 			if err != nil {
 				p.setError(err)
 				return
@@ -72,7 +73,7 @@ func Filter[T any](p *Pipeline, filter func(T) (bool, error), in <-chan T, out c
 // channel. Any remaining items after the input channel closes are processed
 // as a final batch. The batcher must return a non-nil pointer when err is nil,
 // otherwise a panic will occur.
-func Batch[In any, Out any](p *Pipeline, batcher func([]In) (*Out, error), batchSize int, in <-chan In, out chan<- Out) {
+func Batch[In any, Out any](p *Pipeline, batcher func(context.Context, []In) (*Out, error), batchSize int, in <-chan In, out chan<- Out) {
 	p.group.Add(1)
 
 	go func() {
@@ -87,7 +88,7 @@ func Batch[In any, Out any](p *Pipeline, batcher func([]In) (*Out, error), batch
 			if len(batch) >= batchSize {
 				localBatch := append([]In(nil), batch...)
 
-				output, err := batcher(localBatch)
+				output, err := batcher(p.ctx, localBatch)
 				if err != nil {
 					p.setError(err)
 					return
@@ -113,7 +114,7 @@ func Batch[In any, Out any](p *Pipeline, batcher func([]In) (*Out, error), batch
 			// references to previous batches.
 			batchCopy := append([]In(nil), batch...)
 
-			output, err := batcher(batchCopy)
+			output, err := batcher(p.ctx, batchCopy)
 			if err != nil {
 				p.setError(err)
 				return
@@ -243,7 +244,7 @@ func FanOutRoundRobin[T any](p *Pipeline, in <-chan T, out ...chan<- T) {
 // successful results to the output channel until the context is done or the
 // input channel is closed. The transformer must return a non-nil pointer when
 // err is nil, otherwise a panic will occur.
-func ParallelTransform[In any, Out any](p *Pipeline, workers int, transformer func(In) (*Out, error), in <-chan In, out chan<- Out) {
+func ParallelTransform[In any, Out any](p *Pipeline, workers int, transformer func(context.Context, In) (*Out, error), in <-chan In, out chan<- Out) {
 	p.group.Add(1)
 
 	go func() {
@@ -267,7 +268,7 @@ func ParallelTransform[In any, Out any](p *Pipeline, workers int, transformer fu
 						}
 					}
 
-					output, err := transformer(input)
+					output, err := transformer(ctx, input)
 					if err != nil {
 						return err
 					}
@@ -336,7 +337,7 @@ func Limit[T any](p *Pipeline, n int, in <-chan T, out chan<- T) {
 // provided output channels, as determined by the selector function. The
 // selector must return a valid index into the out slice. Panics if the
 // selector returns an invalid index.
-func Split[T any](p *Pipeline, selector func(T) int, in <-chan T, out ...chan<- T) {
+func Split[T any](p *Pipeline, selector func(context.Context, T) int, in <-chan T, out ...chan<- T) {
 	p.group.Add(1)
 
 	go func() {
@@ -348,7 +349,7 @@ func Split[T any](p *Pipeline, selector func(T) int, in <-chan T, out ...chan<- 
 		defer p.group.Done()
 
 		for input := range in {
-			index := selector(input)
+			index := selector(p.ctx, input)
 			if index < 0 || index >= len(out) {
 				panic("Split: selector returned invalid index")
 			}

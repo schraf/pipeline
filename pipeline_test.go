@@ -21,7 +21,7 @@ func TestTransform(t *testing.T) {
 	}
 	close(in)
 
-	Transform(p, func(x int) (*int, error) {
+	Transform(p, func(_ context.Context, x int) (*int, error) {
 		result := x * 2
 		return &result, nil
 	}, in, out)
@@ -48,7 +48,7 @@ func TestFilter(t *testing.T) {
 	}
 	close(in)
 
-	Filter(p, func(x int) (bool, error) {
+	Filter(p, func(_ context.Context, x int) (bool, error) {
 		return x%2 == 0, nil
 	}, in, out)
 
@@ -74,7 +74,7 @@ func TestBatch(t *testing.T) {
 	}
 	close(in)
 
-	Batch(p, func(batch []int) (*int, error) {
+	Batch(p, func(_ context.Context, batch []int) (*int, error) {
 		sum := 0
 		for _, v := range batch {
 			sum += v
@@ -242,7 +242,7 @@ func TestParallelTransform(t *testing.T) {
 	}
 	close(in)
 
-	ParallelTransform(p, 3, func(x int) (*int, error) {
+	ParallelTransform(p, 3, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(10 * time.Millisecond)
 		result := x * 2
 		return &result, nil
@@ -305,7 +305,7 @@ func TestSplit(t *testing.T) {
 	}
 	close(in)
 
-	Split(p, func(x int) int {
+	Split(p, func(_ context.Context, x int) int {
 		return (x - 1) % 3
 	}, in, out1, out2, out3)
 
@@ -384,12 +384,12 @@ func TestPipeline_TransformFilterLimit(t *testing.T) {
 		close(in)
 	}()
 
-	Transform(p, func(x int) (*int, error) {
+	Transform(p, func(_ context.Context, x int) (*int, error) {
 		result := x * 2
 		return &result, nil
 	}, in, transformed)
 
-	Filter(p, func(x int) (bool, error) {
+	Filter(p, func(_ context.Context, x int) (bool, error) {
 		return x > 20, nil
 	}, transformed, filtered)
 
@@ -425,13 +425,13 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 		close(in)
 	}()
 
-	ParallelTransform(p, 5, func(x int) (*int, error) {
+	ParallelTransform(p, 5, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(5 * time.Millisecond)
 		result := x * 3
 		return &result, nil
 	}, in, transformed)
 
-	Batch(p, func(batch []int) (*[]int, error) {
+	Batch(p, func(_ context.Context, batch []int) (*[]int, error) {
 		return &batch, nil
 	}, 5, transformed, batched)
 
@@ -490,7 +490,7 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 
 	FanIn(p, merged, in1, in2, in3)
 
-	Transform(p, func(x int) (*int, error) {
+	Transform(p, func(_ context.Context, x int) (*int, error) {
 		result := x * 2
 		return &result, nil
 	}, merged, transformed)
@@ -544,21 +544,21 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 		close(in)
 	}()
 
-	Split(p, func(x int) int {
+	Split(p, func(_ context.Context, x int) int {
 		return (x - 1) % 3
 	}, in, out1, out2, out3)
 
-	Transform(p, func(x int) (*int, error) {
+	Transform(p, func(_ context.Context, x int) (*int, error) {
 		result := x * 10
 		return &result, nil
 	}, out1, transformed1)
 
-	Transform(p, func(x int) (*int, error) {
+	Transform(p, func(_ context.Context, x int) (*int, error) {
 		result := x * 20
 		return &result, nil
 	}, out2, transformed2)
 
-	Transform(p, func(x int) (*int, error) {
+	Transform(p, func(_ context.Context, x int) (*int, error) {
 		result := x * 30
 		return &result, nil
 	}, out3, transformed3)
@@ -610,23 +610,23 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 	}()
 
 	// Stage 1: Filter evens
-	Filter(p, func(x int) (bool, error) {
+	Filter(p, func(_ context.Context, x int) (bool, error) {
 		return x%2 == 0, nil
 	}, stage1, stage2)
 
 	// Stage 2: Transform (multiply by 3)
-	Transform(p, func(x int) (*int, error) {
+	Transform(p, func(_ context.Context, x int) (*int, error) {
 		result := x * 3
 		return &result, nil
 	}, stage2, stage3)
 
 	// Stage 3: Batch into groups of 4
-	Batch(p, func(batch []int) (*[]int, error) {
+	Batch(p, func(_ context.Context, batch []int) (*[]int, error) {
 		return &batch, nil
 	}, 4, stage3, stage4)
 
 	// Stage 4: Transform batches (sum)
-	Transform(p, func(batch []int) (*int, error) {
+	Transform(p, func(_ context.Context, batch []int) (*int, error) {
 		sum := 0
 		for _, v := range batch {
 			sum += v
@@ -635,7 +635,7 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 	}, stage4, stage5)
 
 	// Stage 5: Filter sums > 100
-	Filter(p, func(x int) (bool, error) {
+	Filter(p, func(_ context.Context, x int) (bool, error) {
 		return x > 100, nil
 	}, stage5, stage6)
 
@@ -678,19 +678,19 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 
 	FanOutRoundRobin(p, in, out1, out2, out3)
 
-	ParallelTransform(p, 2, func(x int) (*int, error) {
+	ParallelTransform(p, 2, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(5 * time.Millisecond)
 		result := x * 100
 		return &result, nil
 	}, out1, processed1)
 
-	ParallelTransform(p, 2, func(x int) (*int, error) {
+	ParallelTransform(p, 2, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(5 * time.Millisecond)
 		result := x * 200
 		return &result, nil
 	}, out2, processed2)
 
-	ParallelTransform(p, 2, func(x int) (*int, error) {
+	ParallelTransform(p, 2, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(5 * time.Millisecond)
 		result := x * 300
 		return &result, nil
@@ -737,7 +737,7 @@ func TestPipeline_WithError(t *testing.T) {
 		close(in)
 	}()
 
-	Transform(p, func(x int) (*int, error) {
+	Transform(p, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(10 * time.Millisecond)
 
 		if x == 5 {

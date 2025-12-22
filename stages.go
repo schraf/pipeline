@@ -8,9 +8,35 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Source reads values from the provided iterator and sends them to the output
-// channel until the iterator is exhausted or the context is done.
-func Source[T any](p *Pipeline, seq iter.Seq[T], out chan<- T) {
+// Source reads values from an iterator that can return errors. It sends values
+// to the output channel until the iterator is exhausted, an error occurs, or
+// the context is done. If the iterator returns an error, the pipeline is
+// cancelled.
+func Source[T any](p *Pipeline, seq iter.Seq2[T, error], out chan<- T) {
+	p.group.Add(1)
+
+	go func() {
+		defer close(out)
+		defer p.group.Done()
+
+		for v, err := range seq {
+			if err != nil {
+				p.setError(err)
+				return
+			}
+
+			select {
+			case <-p.ctx.Done():
+				return
+			case out <- v:
+			}
+		}
+	}()
+}
+
+// SourceSlice reads values from the provided iterator and sends them to the
+// output channel until the iterator is exhausted or the context is done.
+func SourceSlice[T any](p *Pipeline, seq iter.Seq[T], out chan<- T) {
 	p.group.Add(1)
 
 	go func() {

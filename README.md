@@ -20,41 +20,41 @@ go get github.com/schraf/pipeline
 package main
 
 import (
-    "context"
-    "fmt"
-    "github.com/schraf/pipeline"
-    "iter"
-    "slices"
+	"context"
+	"fmt"
+	"slices"
+
+	"github.com/schraf/pipeline"
 )
 
 func main() {
-    p, _ := pipeline.WithPipeline(context.Background())
+	p, _ := pipeline.WithPipeline(context.Background())
 
-    // Define some data to process
-    data := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	// Define some data to process
+	data := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
-    // Create channels
-    in := make(chan int, len(data))
-    out := make(chan int, len(data))
+	// Create channels
+	in := make(chan int, len(data))
+	out := make(chan int, len(data))
 
-    // Source: feed data into the pipeline
-    pipeline.Source(p, slices.Values(data), in)
+	// Source: feed data into the pipeline from a slice
+	pipeline.SourceSlice(p, slices.Values(data), in)
 
-    // Transform: multiply by 2
-    pipeline.Transform(p, func(ctx context.Context, x int) (*int, error) {
-        result := x * 2
-        return &result, nil
-    }, in, out)
+	// Transform: multiply by 2
+	pipeline.Transform(p, func(ctx context.Context, x int) (*int, error) {
+		result := x * 2
+		return &result, nil
+	}, in, out)
 
-    // Wait for pipeline to complete
-    if err := p.Wait(); err != nil {
-        panic(err)
-    }
+	// Wait for pipeline to complete
+	if err := p.Wait(); err != nil {
+		panic(err)
+	}
 
-    // Read results
-    for v := range out {
-        fmt.Println(v)
-    }
+	// Read results
+	for v := range out {
+		fmt.Println(v)
+	}
 }
 ```
 
@@ -62,14 +62,27 @@ func main() {
 
 ### Source
 
-Starts a pipeline from an iterator (`iter.Seq[T]`):
+Starts a pipeline from a fallible iterator (`iter.Seq2[T, error]`). If the iterator returns an error, the pipeline is cancelled.
+
+```go
+// Example: create a custom iterator that reads from a file or database
+// and can return an error.
+var myIterator iter.Seq2[string, error] 
+
+out := make(chan string, 100)
+pipeline.Source(p, myIterator, out)
+```
+
+### SourceSlice
+
+Starts a pipeline from a simple, error-free iterator (`iter.Seq[T]`), which is useful for in-memory slices.
 
 ```go
 data := []int{1, 2, 3, 4, 5}
 out := make(chan int, 5)
 
 // The iterator can be created from a slice using slices.Values
-pipeline.Source(p, slices.Values(data), out)
+pipeline.SourceSlice(p, slices.Values(data), out)
 ```
 
 ### Transform

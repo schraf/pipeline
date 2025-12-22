@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"iter"
 	"slices"
 	"testing"
 	"time"
@@ -11,13 +12,68 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSource(t *testing.T) {
+// fallibleIterator returns an iterator that yields values from a slice and
+// then returns an error.
+func fallibleIterator[T any](data []T, err error) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		for _, v := range data {
+			if !yield(v, nil) {
+				return
+			}
+		}
+		if err != nil {
+			yield(*new(T), err)
+		}
+	}
+}
+
+func TestSource_Success(t *testing.T) {
 	p, _ := WithPipeline(context.Background())
 
 	out := make(chan int, 5)
 	data := []int{1, 2, 3, 4, 5}
 
-	Source(p, slices.Values(data), out)
+	Source(p, fallibleIterator(data, nil), out)
+
+	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
+
+	var results []int
+	for v := range out {
+		results = append(results, v)
+	}
+
+	assert.Equal(t, data, results)
+}
+
+func TestSource_Error(t *testing.T) {
+	p, _ := WithPipeline(context.Background())
+
+	out := make(chan int, 5)
+	data := []int{1, 2, 3}
+	expectedErr := errors.New("iterator error")
+
+	Source(p, fallibleIterator(data, expectedErr), out)
+
+	err := p.Wait()
+	require.ErrorIs(t, err, expectedErr)
+
+	// Collect whatever made it out before the error
+	var results []int
+	for v := range out {
+		results = append(results, v)
+	}
+
+	// Check that we got the data before the error
+	assert.Equal(t, data, results)
+}
+
+func TestSourceSlice(t *testing.T) {
+	p, _ := WithPipeline(context.Background())
+
+	out := make(chan int, 5)
+	data := []int{1, 2, 3, 4, 5}
+
+	SourceSlice(p, slices.Values(data), out)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 

@@ -23,21 +23,22 @@ import (
     "context"
     "fmt"
     "github.com/schraf/pipeline"
+    "iter"
+    "slices"
 )
 
 func main() {
     p, _ := pipeline.WithPipeline(context.Background())
 
-    in := make(chan int, 10)
-    out := make(chan int, 10)
+    // Define some data to process
+    data := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
-    // Send some values
-    go func() {
-        for i := 1; i <= 10; i++ {
-            in <- i
-        }
-        close(in)
-    }()
+    // Create channels
+    in := make(chan int, len(data))
+    out := make(chan int, len(data))
+
+    // Source: feed data into the pipeline
+    pipeline.Source(p, slices.Values(data), in)
 
     // Transform: multiply by 2
     pipeline.Transform(p, func(ctx context.Context, x int) (*int, error) {
@@ -58,6 +59,18 @@ func main() {
 ```
 
 ## Pipeline Stages
+
+### Source
+
+Starts a pipeline from an iterator (`iter.Seq[T]`):
+
+```go
+data := []int{1, 2, 3, 4, 5}
+out := make(chan int, 5)
+
+// The iterator can be created from a slice using slices.Values
+pipeline.Source(p, slices.Values(data), out)
+```
 
 ### Transform
 

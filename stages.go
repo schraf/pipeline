@@ -3,9 +3,36 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"iter"
 
 	"golang.org/x/sync/errgroup"
 )
+
+// Source reads values from the provided iterator and sends them to the output
+// channel until the iterator is exhausted or the context is done.
+func Source[T any](p *Pipeline, seq iter.Seq[T], out chan<- T) {
+	p.group.Add(1)
+
+	go func() {
+		defer close(out)
+		defer p.group.Done()
+
+		// The yield function sends a value to the output channel. It returns false
+		// if the context is cancelled, which stops the iterator.
+		yield := func(v T) bool {
+			select {
+			case <-p.ctx.Done():
+				return false
+			case out <- v:
+				return true
+			}
+		}
+
+		// Pull values from the iterator until it is exhausted or the yield
+		// function returns false.
+		seq(yield)
+	}()
+}
 
 // Transform reads values from the input channel, applies the transformer
 // function, and forwards successful results to the output channel until the

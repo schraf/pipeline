@@ -3,12 +3,31 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSource(t *testing.T) {
+	p, _ := WithPipeline(context.Background())
+
+	out := make(chan int, 5)
+	data := []int{1, 2, 3, 4, 5}
+
+	Source(p, slices.Values(data), out)
+
+	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
+
+	var results []int
+	for v := range out {
+		results = append(results, v)
+	}
+
+	assert.Equal(t, data, results)
+}
 
 func TestTransform(t *testing.T) {
 	p, _ := WithPipeline(context.Background())

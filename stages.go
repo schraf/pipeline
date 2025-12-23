@@ -74,6 +74,10 @@ func Sink[T any](p *Pipeline, in <-chan T) iter.Seq2[T, error] {
 				return
 			case v, ok := <-in:
 				if !ok {
+					if err := p.ctx.Err(); err != nil {
+						var zero T
+						yield(zero, err)
+					}
 					return
 				}
 				if !yield(v, nil) {

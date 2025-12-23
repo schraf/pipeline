@@ -85,6 +85,80 @@ func TestSourceSlice(t *testing.T) {
 	assert.Equal(t, data, results)
 }
 
+func TestSink_Success(t *testing.T) {
+	p, _ := WithPipeline(context.Background())
+
+	in := make(chan int, 5)
+	data := []int{1, 2, 3, 4, 5}
+
+	SourceSlice(p, slices.Values(data), in)
+
+	it := Sink(p, in)
+
+	waitErrCh := make(chan error)
+	go func() {
+		waitErrCh <- p.Wait()
+	}()
+
+	var results []int
+	for v, err := range it {
+		require.NoError(t, err)
+		results = append(results, v)
+	}
+
+	assert.Equal(t, data, results)
+
+	err := <-waitErrCh
+	require.NoError(t, err)
+}
+
+func TestSink_ErrorMidStream(t *testing.T) {
+	p, _ := WithPipeline(context.Background())
+	expectedErr := errors.New("mid-stream error")
+
+	in := make(chan int) // unbuffered
+
+	// Custom source that sends 1, then errors.
+	p.group.Add(1)
+	go func() {
+		defer p.group.Done()
+		defer close(in)
+
+		// Send 1
+		select {
+		case in <- 1:
+		case <-p.ctx.Done():
+			return
+		}
+
+		// Then error
+		p.setError(expectedErr)
+	}()
+
+	it := Sink(p, in)
+
+	waitErr := make(chan error)
+	go func() {
+		waitErr <- p.Wait()
+	}()
+
+	var results []int
+	var iterErr error
+	for v, err := range it {
+		if err != nil {
+			iterErr = err
+			break
+		}
+		results = append(results, v)
+	}
+
+	err := <-waitErr
+	require.ErrorIs(t, err, expectedErr)
+
+	assert.Equal(t, []int{1}, results)
+	require.ErrorIs(t, iterErr, context.Canceled)
+}
+
 func TestTransform(t *testing.T) {
 	p, _ := WithPipeline(context.Background())
 

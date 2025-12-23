@@ -46,13 +46,13 @@ func main() {
 		return &result, nil
 	}, in, out)
 
-	// Wait for pipeline to complete
-	if err := p.Wait(); err != nil {
-		panic(err)
-	}
 
 	// Read results
-	for v := range out {
+	for v, err := range pipeline.Sink(p, out) {
+        if err != nil {
+            panic(err)
+        }
+
 		fmt.Println(v)
 	}
 }
@@ -83,6 +83,24 @@ out := make(chan int, 5)
 
 // The iterator can be created from a slice using slices.Values
 pipeline.SourceSlice(p, slices.Values(data), out)
+```
+
+### Sink
+
+The "opposite" of a source, `Sink` takes an input channel and returns an `iter.Seq2[T, error]` iterator. This allows consuming values from a pipeline using a standard `for...range` loop. If the pipeline is cancelled, the iterator will yield an error.
+
+```go
+// Given 'out' is a channel from a pipeline stage...
+it := pipeline.Sink(p, out)
+
+// You can now iterate over the results.
+for v, err := range it {
+    if err != nil {
+        // This can happen if the pipeline is cancelled.
+        log.Fatalf("iterator error: %v", err)
+    }
+    fmt.Println(v)
+}
 ```
 
 ### Transform

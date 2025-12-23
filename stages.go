@@ -60,6 +60,34 @@ func SourceSlice[T any](p *Pipeline, seq iter.Seq[T], out chan<- T) {
 	}()
 }
 
+// Sink returns an iterator that yields values from an input channel. The
+// iterator continues until the channel is closed or the pipeline's context is
+// cancelled. If the context is cancelled, the iterator yields a zero value for
+// T and the context's error.
+func Sink[T any](p *Pipeline, in <-chan T) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		for {
+			select {
+			case <-p.ctx.Done():
+				var zero T
+				yield(zero, p.ctx.Err())
+				return
+			case v, ok := <-in:
+				if !ok {
+					if err := p.ctx.Err(); err != nil {
+						var zero T
+						yield(zero, err)
+					}
+					return
+				}
+				if !yield(v, nil) {
+					return
+				}
+			}
+		}
+	}
+}
+
 // Transform reads values from the input channel, applies the transformer
 // function, and forwards successful results to the output channel until the
 // context is done or the input channel is closed. The transformer must return

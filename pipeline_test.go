@@ -515,6 +515,31 @@ func TestAggregate(t *testing.T) {
 	assert.Equal(t, expected, result)
 }
 
+func TestFlatten(t *testing.T) {
+	p, _ := WithPipeline(context.Background())
+
+	in := make(chan []int, 3)
+	out := make(chan int, 10)
+
+	// Send some slices
+	in <- []int{1, 2}
+	in <- []int{3, 4, 5}
+	in <- []int{6}
+	close(in)
+
+	Flatten(p, in, out)
+
+	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
+
+	var results []int
+	for v := range out {
+		results = append(results, v)
+	}
+
+	expected := []int{1, 2, 3, 4, 5, 6}
+	assert.Equal(t, expected, results)
+}
+
 // End-to-end tests
 
 func TestPipeline_TransformFilterLimit(t *testing.T) {

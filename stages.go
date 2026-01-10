@@ -477,3 +477,25 @@ func Aggregate[T any](p *Pipeline, in <-chan T, out chan<- []T) {
 		}
 	}()
 }
+
+// Flatten takes an input channel of slices and emits each element of each
+// slice as an individual item on the output channel. It continues until the
+// input channel is closed or the context is cancelled.
+func Flatten[T any](p *Pipeline, in <-chan []T, out chan<- T) {
+	p.group.Add(1)
+
+	go func() {
+		defer close(out)
+		defer p.group.Done()
+
+		for slice := range in {
+			for _, item := range slice {
+				select {
+				case <-p.ctx.Done():
+					return
+				case out <- item:
+				}
+			}
+		}
+	}()
+}

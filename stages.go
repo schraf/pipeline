@@ -478,6 +478,44 @@ func Aggregate[T any](p *Pipeline, in <-chan T, out chan<- []T) {
 	}()
 }
 
+// Reduce processes values from the input channel incrementally using a reducer
+// function, combining them with an accumulator. This allows aggregating results
+// as they come in without keeping all values in memory. The reducer function
+// takes the current accumulator and the next value, and returns the updated
+// accumulator. The final accumulated result is sent to the output channel.
+func Reduce[T any, Acc any](p *Pipeline, initial Acc, reducer func(context.Context, Acc, T) (Acc, error), in <-chan T, out chan<- Acc) {
+	p.group.Add(1)
+
+	go func() {
+		defer close(out)
+		defer p.group.Done()
+
+		accumulator := initial
+
+		for input := range in {
+			var err error
+			accumulator, err = reducer(p.ctx, accumulator, input)
+			if err != nil {
+				p.setError(err)
+				return
+			}
+
+			select {
+			case <-p.ctx.Done():
+				return
+			default:
+				// Continue processing
+			}
+		}
+
+		select {
+		case <-p.ctx.Done():
+			return
+		case out <- accumulator:
+		}
+	}()
+}
+
 // Flatten takes an input channel of slices and emits each element of each
 // slice as an individual item on the output channel. It continues until the
 // input channel is closed or the context is cancelled.

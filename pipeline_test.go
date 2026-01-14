@@ -515,6 +515,77 @@ func TestAggregate(t *testing.T) {
 	assert.Equal(t, expected, result)
 }
 
+func TestReduce_Sum(t *testing.T) {
+	p, _ := WithPipeline(context.Background())
+
+	in := make(chan int, 5)
+	out := make(chan int, 1)
+
+	for i := 1; i <= 5; i++ {
+		in <- i
+	}
+	close(in)
+
+	Reduce(p, 0, func(_ context.Context, acc int, val int) (int, error) {
+		return acc + val, nil
+	}, in, out)
+
+	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
+
+	result := <-out
+	expected := 15 // 1+2+3+4+5
+	assert.Equal(t, expected, result)
+}
+
+func TestReduce_StringConcatenation(t *testing.T) {
+	p, _ := WithPipeline(context.Background())
+
+	in := make(chan string, 4)
+	out := make(chan string, 1)
+
+	words := []string{"hello", " ", "world", "!"}
+	for _, word := range words {
+		in <- word
+	}
+	close(in)
+
+	Reduce(p, "", func(_ context.Context, acc string, val string) (string, error) {
+		return acc + val, nil
+	}, in, out)
+
+	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
+
+	result := <-out
+	expected := "hello world!"
+	assert.Equal(t, expected, result)
+}
+
+func TestReduce_MaxValue(t *testing.T) {
+	p, _ := WithPipeline(context.Background())
+
+	in := make(chan int, 6)
+	out := make(chan int, 1)
+
+	values := []int{3, 7, 2, 9, 1, 5}
+	for _, val := range values {
+		in <- val
+	}
+	close(in)
+
+	Reduce(p, 0, func(_ context.Context, acc int, val int) (int, error) {
+		if val > acc {
+			return val, nil
+		}
+		return acc, nil
+	}, in, out)
+
+	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
+
+	result := <-out
+	expected := 9
+	assert.Equal(t, expected, result)
+}
+
 func TestFlatten(t *testing.T) {
 	p, _ := WithPipeline(context.Background())
 

@@ -199,6 +199,24 @@ Collects all values into a single slice:
 pipeline.Aggregate(p, in, out)
 ```
 
+### Reduce
+
+Processes values incrementally using a reducer function, combining them with an accumulator. This allows aggregating results as they come in without keeping all values in memory:
+
+```go
+pipeline.Reduce(p, 0, func(ctx context.Context, acc int, x int) (int, error) {
+    return acc + x, nil
+}, in, out)
+```
+
+### Flatten
+
+Takes an input channel of slices and emits each element of each slice as an individual item on the output channel:
+
+```go
+pipeline.Flatten(p, in, out)
+```
+
 ## Error Handling
 
 The pipeline automatically cancels all stages when an error occurs. The first error encountered is returned by `Wait()`:

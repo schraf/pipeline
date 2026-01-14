@@ -611,6 +611,37 @@ func TestFlatten(t *testing.T) {
 	assert.Equal(t, expected, results)
 }
 
+func TestExpand(t *testing.T) {
+	p, _ := WithPipeline(context.Background())
+
+	in := make(chan int, 3)
+	out := make(chan int, 10)
+
+	for i := 1; i <= 3; i++ {
+		in <- i
+	}
+	close(in)
+
+	Expand(p, func(_ context.Context, x int) iter.Seq2[int, error] {
+		// For each input, output x, x*2, x*3
+		return func(yield func(int, error) bool) {
+			yield(x, nil)
+			yield(x*2, nil)
+			yield(x*3, nil)
+		}
+	}, in, out)
+
+	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
+
+	var results []int
+	for v := range out {
+		results = append(results, v)
+	}
+
+	expected := []int{1, 2, 3, 2, 4, 6, 3, 6, 9}
+	assert.Equal(t, expected, results)
+}
+
 // End-to-end tests
 
 func TestPipeline_TransformFilterLimit(t *testing.T) {

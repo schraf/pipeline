@@ -217,6 +217,19 @@ Takes an input channel of slices and emits each element of each slice as an indi
 pipeline.Flatten(p, in, out)
 ```
 
+### Expand
+
+Takes single input items from a channel and for each input, outputs multiple items of another type. The expander function returns an iterator (`iter.Seq2[Out, error]`) of output items for each input, allowing for lazy evaluation and avoiding loading all expanded items into memory at once:
+
+```go
+pipeline.Expand(p, func(ctx context.Context, x int) iter.Seq2[string, error] {
+    return func(yield func(string, error) bool) {
+        yield(fmt.Sprintf("%d", x), nil)
+        yield(fmt.Sprintf("%d", x*2), nil)
+    }
+}, in, out)
+```
+
 ## Error Handling
 
 The pipeline automatically cancels all stages when an error occurs. The first error encountered is returned by `Wait()`:

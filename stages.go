@@ -119,6 +119,38 @@ func Transform[In any, Out any](p *Pipeline, transformer func(context.Context, I
 	}()
 }
 
+// Expand reads values from the input channel, applies the expander function to
+// each value, and forwards all items from the returned iterator to the output
+// channel. For each input item, the expander returns an iterator of output items,
+// which are all sent to the output channel. Processing continues until the
+// context is done or the input channel is closed. This allows for lazy evaluation
+// and avoids loading all expanded items into memory at once.
+func Expand[In any, Out any](p *Pipeline, expander func(context.Context, In) iter.Seq2[Out, error], in <-chan In, out chan<- Out) {
+	p.group.Add(1)
+
+	go func() {
+		defer close(out)
+		defer p.group.Done()
+
+		for input := range in {
+			seq := expander(p.ctx, input)
+
+			for output, err := range seq {
+				if err != nil {
+					p.setError(err)
+					return
+				}
+
+				select {
+				case <-p.ctx.Done():
+					return
+				case out <- output:
+				}
+			}
+		}
+	}()
+}
+
 // Filter reads values from the input channel, applies the filter predicate,
 // and forwards only values that satisfy the predicate to the output channel.
 // It respects context cancellation and stops processing on error.

@@ -28,12 +28,12 @@ func fallibleIterator[T any](data []T, err error) iter.Seq2[T, error] {
 }
 
 func TestSource_Success(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	out := make(chan int, 5)
 	data := []int{1, 2, 3, 4, 5}
 
-	Source(p, fallibleIterator(data, nil), out)
+	Source("test-source", p, fallibleIterator(data, nil), out)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -46,13 +46,13 @@ func TestSource_Success(t *testing.T) {
 }
 
 func TestSource_Error(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	out := make(chan int, 5)
 	data := []int{1, 2, 3}
 	expectedErr := errors.New("iterator error")
 
-	Source(p, fallibleIterator(data, expectedErr), out)
+	Source("test-source-error", p, fallibleIterator(data, expectedErr), out)
 
 	err := p.Wait()
 	require.ErrorIs(t, err, expectedErr)
@@ -68,12 +68,12 @@ func TestSource_Error(t *testing.T) {
 }
 
 func TestSourceSlice(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	out := make(chan int, 5)
 	data := []int{1, 2, 3, 4, 5}
 
-	SourceSlice(p, slices.Values(data), out)
+	SourceSlice("test-source-slice", p, slices.Values(data), out)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -86,14 +86,14 @@ func TestSourceSlice(t *testing.T) {
 }
 
 func TestSink_Success(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 5)
 	data := []int{1, 2, 3, 4, 5}
 
-	SourceSlice(p, slices.Values(data), in)
+	SourceSlice("test-source-slice", p, slices.Values(data), in)
 
-	it := Sink(p, in)
+	it := Sink("test-sink", p, in)
 
 	waitErrCh := make(chan error)
 	go func() {
@@ -113,7 +113,7 @@ func TestSink_Success(t *testing.T) {
 }
 
 func TestSink_ErrorMidStream(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 	expectedErr := errors.New("mid-stream error")
 
 	in := make(chan int) // unbuffered
@@ -135,7 +135,7 @@ func TestSink_ErrorMidStream(t *testing.T) {
 		p.setError(expectedErr)
 	}()
 
-	it := Sink(p, in)
+	it := Sink("test-sink", p, in)
 
 	waitErr := make(chan error)
 	go func() {
@@ -160,7 +160,7 @@ func TestSink_ErrorMidStream(t *testing.T) {
 }
 
 func TestTransform(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 5)
 	out := make(chan int, 5)
@@ -170,7 +170,7 @@ func TestTransform(t *testing.T) {
 	}
 	close(in)
 
-	Transform(p, func(_ context.Context, x int) (*int, error) {
+	Transform("test-transform", p, func(_ context.Context, x int) (*int, error) {
 		result := x * 2
 		return &result, nil
 	}, in, out)
@@ -187,7 +187,7 @@ func TestTransform(t *testing.T) {
 }
 
 func TestFilter(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 10)
 	out := make(chan int, 10)
@@ -197,7 +197,7 @@ func TestFilter(t *testing.T) {
 	}
 	close(in)
 
-	Filter(p, func(_ context.Context, x int) (bool, error) {
+	Filter("test-filter", p, func(_ context.Context, x int) (bool, error) {
 		return x%2 == 0, nil
 	}, in, out)
 
@@ -213,7 +213,7 @@ func TestFilter(t *testing.T) {
 }
 
 func TestBatch(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 10)
 	out := make(chan int, 10)
@@ -223,7 +223,7 @@ func TestBatch(t *testing.T) {
 	}
 	close(in)
 
-	Batch(p, func(_ context.Context, batch []int) (*int, error) {
+	Batch("test-batch", p, func(_ context.Context, batch []int) (*int, error) {
 		sum := 0
 		for _, v := range batch {
 			sum += v
@@ -244,7 +244,7 @@ func TestBatch(t *testing.T) {
 }
 
 func TestFanIn(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in1 := make(chan int, 3)
 	in2 := make(chan int, 3)
@@ -266,7 +266,7 @@ func TestFanIn(t *testing.T) {
 	in3 <- 9
 	close(in3)
 
-	FanIn(p, out, in1, in2, in3)
+	FanIn("test-fan-in", p, out, in1, in2, in3)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -286,7 +286,7 @@ func TestFanIn(t *testing.T) {
 }
 
 func TestFanOut(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 3)
 	out1 := make(chan int, 3)
@@ -298,7 +298,7 @@ func TestFanOut(t *testing.T) {
 	in <- 3
 	close(in)
 
-	FanOut(p, in, out1, out2, out3)
+	FanOut("test-fan-out", p, in, out1, out2, out3)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -329,7 +329,7 @@ func TestFanOut(t *testing.T) {
 }
 
 func TestFanOutRoundRobin(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 6)
 	out1 := make(chan int, 3)
@@ -341,7 +341,7 @@ func TestFanOutRoundRobin(t *testing.T) {
 	}
 	close(in)
 
-	FanOutRoundRobin(p, in, out1, out2, out3)
+	FanOutRoundRobin("test-fan-out-round-robin", p, in, out1, out2, out3)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -381,7 +381,7 @@ func TestFanOutRoundRobin(t *testing.T) {
 }
 
 func TestParallelTransform(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 10)
 	out := make(chan int, 10)
@@ -391,7 +391,7 @@ func TestParallelTransform(t *testing.T) {
 	}
 	close(in)
 
-	ParallelTransform(p, 3, func(_ context.Context, x int) (*int, error) {
+	ParallelTransform("test-parallel-transform", p, 3, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(10 * time.Millisecond)
 		result := x * 2
 		return &result, nil
@@ -418,7 +418,7 @@ func TestParallelTransform(t *testing.T) {
 }
 
 func TestLimit(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 10)
 	out := make(chan int, 5)
@@ -428,7 +428,7 @@ func TestLimit(t *testing.T) {
 	}
 	close(in)
 
-	Limit(p, 5, in, out)
+	Limit("test-limit", p, 5, in, out)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -442,7 +442,7 @@ func TestLimit(t *testing.T) {
 }
 
 func TestSplit(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 6)
 	out1 := make(chan int, 3)
@@ -454,7 +454,7 @@ func TestSplit(t *testing.T) {
 	}
 	close(in)
 
-	Split(p, func(_ context.Context, x int) int {
+	Split("test-split", p, func(_ context.Context, x int) int {
 		return (x - 1) % 3
 	}, in, out1, out2, out3)
 
@@ -496,7 +496,7 @@ func TestSplit(t *testing.T) {
 }
 
 func TestAggregate(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 5)
 	out := make(chan []int, 1)
@@ -506,7 +506,7 @@ func TestAggregate(t *testing.T) {
 	}
 	close(in)
 
-	Aggregate(p, in, out)
+	Aggregate("test-aggregate", p, in, out)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -516,7 +516,7 @@ func TestAggregate(t *testing.T) {
 }
 
 func TestReduce_Sum(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 5)
 	out := make(chan int, 1)
@@ -526,7 +526,7 @@ func TestReduce_Sum(t *testing.T) {
 	}
 	close(in)
 
-	Reduce(p, 0, func(_ context.Context, acc int, val int) (int, error) {
+	Reduce("test-reduce-sum", p, 0, func(_ context.Context, acc int, val int) (int, error) {
 		return acc + val, nil
 	}, in, out)
 
@@ -538,7 +538,7 @@ func TestReduce_Sum(t *testing.T) {
 }
 
 func TestReduce_StringConcatenation(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan string, 4)
 	out := make(chan string, 1)
@@ -549,7 +549,7 @@ func TestReduce_StringConcatenation(t *testing.T) {
 	}
 	close(in)
 
-	Reduce(p, "", func(_ context.Context, acc string, val string) (string, error) {
+	Reduce("test-reduce-string", p, "", func(_ context.Context, acc string, val string) (string, error) {
 		return acc + val, nil
 	}, in, out)
 
@@ -561,7 +561,7 @@ func TestReduce_StringConcatenation(t *testing.T) {
 }
 
 func TestReduce_MaxValue(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 6)
 	out := make(chan int, 1)
@@ -572,7 +572,7 @@ func TestReduce_MaxValue(t *testing.T) {
 	}
 	close(in)
 
-	Reduce(p, 0, func(_ context.Context, acc int, val int) (int, error) {
+	Reduce("test-reduce-max", p, 0, func(_ context.Context, acc int, val int) (int, error) {
 		if val > acc {
 			return val, nil
 		}
@@ -587,7 +587,7 @@ func TestReduce_MaxValue(t *testing.T) {
 }
 
 func TestFlatten(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan []int, 3)
 	out := make(chan int, 10)
@@ -598,7 +598,7 @@ func TestFlatten(t *testing.T) {
 	in <- []int{6}
 	close(in)
 
-	Flatten(p, in, out)
+	Flatten("test-flatten", p, in, out)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -612,7 +612,7 @@ func TestFlatten(t *testing.T) {
 }
 
 func TestExpand(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	in := make(chan int, 3)
 	out := make(chan int, 10)
@@ -622,7 +622,7 @@ func TestExpand(t *testing.T) {
 	}
 	close(in)
 
-	Expand(p, func(_ context.Context, x int) iter.Seq2[int, error] {
+	Expand("test-expand", p, func(_ context.Context, x int) iter.Seq2[int, error] {
 		// For each input, output x, x*2, x*3
 		return func(yield func(int, error) bool) {
 			yield(x, nil)
@@ -645,7 +645,7 @@ func TestExpand(t *testing.T) {
 // End-to-end tests
 
 func TestPipeline_TransformFilterLimit(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	// Pipeline: Transform -> Filter -> Limit
 	in := make(chan int, 20)
@@ -660,16 +660,16 @@ func TestPipeline_TransformFilterLimit(t *testing.T) {
 		close(in)
 	}()
 
-	Transform(p, func(_ context.Context, x int) (*int, error) {
+	Transform("test-transform-filter-limit-transform", p, func(_ context.Context, x int) (*int, error) {
 		result := x * 2
 		return &result, nil
 	}, in, transformed)
 
-	Filter(p, func(_ context.Context, x int) (bool, error) {
+	Filter("test-transform-filter-limit-filter", p, func(_ context.Context, x int) (bool, error) {
 		return x > 20, nil
 	}, transformed, filtered)
 
-	Limit(p, 5, filtered, out)
+	Limit("test-transform-filter-limit-limit", p, 5, filtered, out)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -687,7 +687,7 @@ func TestPipeline_TransformFilterLimit(t *testing.T) {
 }
 
 func TestPipeline_ParallelTransformBatch(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	// Pipeline: ParallelTransform -> Batch
 	in := make(chan int, 30)
@@ -701,13 +701,13 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 		close(in)
 	}()
 
-	ParallelTransform(p, 5, func(_ context.Context, x int) (*int, error) {
+	ParallelTransform("test-parallel-transform-batch-transform", p, 5, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(5 * time.Millisecond)
 		result := x * 3
 		return &result, nil
 	}, in, transformed)
 
-	Batch(p, func(_ context.Context, batch []int) (*[]int, error) {
+	Batch("test-parallel-transform-batch-batch", p, func(_ context.Context, batch []int) (*[]int, error) {
 		return &batch, nil
 	}, 5, transformed, batched)
 
@@ -732,7 +732,7 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 }
 
 func TestPipeline_FanInTransformFanOut(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	// Pipeline: FanIn -> Transform -> FanOut
 	in1 := make(chan int, 5)
@@ -764,14 +764,14 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 		close(in3)
 	}()
 
-	FanIn(p, merged, in1, in2, in3)
+	FanIn("test-fan-in-transform-fan-out-fan-in", p, merged, in1, in2, in3)
 
-	Transform(p, func(_ context.Context, x int) (*int, error) {
+	Transform("test-fan-in-transform-fan-out-transform", p, func(_ context.Context, x int) (*int, error) {
 		result := x * 2
 		return &result, nil
 	}, merged, transformed)
 
-	FanOut(p, transformed, out1, out2)
+	FanOut("test-fan-in-transform-fan-out-fan-out", p, transformed, out1, out2)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -801,7 +801,7 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 }
 
 func TestPipeline_SplitTransformFanIn(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	// Pipeline: Split -> Transform (on each branch) -> FanIn
 	in := make(chan int, 12)
@@ -820,26 +820,26 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 		close(in)
 	}()
 
-	Split(p, func(_ context.Context, x int) int {
+	Split("test-split-transform-fan-in-split", p, func(_ context.Context, x int) int {
 		return (x - 1) % 3
 	}, in, out1, out2, out3)
 
-	Transform(p, func(_ context.Context, x int) (*int, error) {
+	Transform("test-split-transform-fan-in-transform1", p, func(_ context.Context, x int) (*int, error) {
 		result := x * 10
 		return &result, nil
 	}, out1, transformed1)
 
-	Transform(p, func(_ context.Context, x int) (*int, error) {
+	Transform("test-split-transform-fan-in-transform2", p, func(_ context.Context, x int) (*int, error) {
 		result := x * 20
 		return &result, nil
 	}, out2, transformed2)
 
-	Transform(p, func(_ context.Context, x int) (*int, error) {
+	Transform("test-split-transform-fan-in-transform3", p, func(_ context.Context, x int) (*int, error) {
 		result := x * 30
 		return &result, nil
 	}, out3, transformed3)
 
-	FanIn(p, merged, transformed1, transformed2, transformed3)
+	FanIn("test-split-transform-fan-in-fan-in", p, merged, transformed1, transformed2, transformed3)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -867,7 +867,7 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 }
 
 func TestPipeline_ComplexMultiStage(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	// Complex pipeline: Filter -> Transform -> Batch -> Transform -> Filter -> Limit
 	stage1 := make(chan int, 50)
@@ -886,23 +886,23 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 	}()
 
 	// Stage 1: Filter evens
-	Filter(p, func(_ context.Context, x int) (bool, error) {
+	Filter("test-complex-filter1", p, func(_ context.Context, x int) (bool, error) {
 		return x%2 == 0, nil
 	}, stage1, stage2)
 
 	// Stage 2: Transform (multiply by 3)
-	Transform(p, func(_ context.Context, x int) (*int, error) {
+	Transform("test-complex-transform1", p, func(_ context.Context, x int) (*int, error) {
 		result := x * 3
 		return &result, nil
 	}, stage2, stage3)
 
 	// Stage 3: Batch into groups of 4
-	Batch(p, func(_ context.Context, batch []int) (*[]int, error) {
+	Batch("test-complex-batch", p, func(_ context.Context, batch []int) (*[]int, error) {
 		return &batch, nil
 	}, 4, stage3, stage4)
 
 	// Stage 4: Transform batches (sum)
-	Transform(p, func(_ context.Context, batch []int) (*int, error) {
+	Transform("test-complex-transform2", p, func(_ context.Context, batch []int) (*int, error) {
 		sum := 0
 		for _, v := range batch {
 			sum += v
@@ -911,12 +911,12 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 	}, stage4, stage5)
 
 	// Stage 5: Filter sums > 100
-	Filter(p, func(_ context.Context, x int) (bool, error) {
+	Filter("test-complex-filter2", p, func(_ context.Context, x int) (bool, error) {
 		return x > 100, nil
 	}, stage5, stage6)
 
 	// Stage 6: Limit to 5 results
-	Limit(p, 5, stage6, stage7)
+	Limit("test-complex-limit", p, 5, stage6, stage7)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -933,7 +933,7 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 }
 
 func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 
 	// Pipeline: FanOutRoundRobin -> ParallelTransform (on each branch) -> FanIn
 	in := make(chan int, 15)
@@ -952,27 +952,27 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 		close(in)
 	}()
 
-	FanOutRoundRobin(p, in, out1, out2, out3)
+	FanOutRoundRobin("test-round-robin-fan-out", p, in, out1, out2, out3)
 
-	ParallelTransform(p, 2, func(_ context.Context, x int) (*int, error) {
+	ParallelTransform("test-round-robin-transform1", p, 2, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(5 * time.Millisecond)
 		result := x * 100
 		return &result, nil
 	}, out1, processed1)
 
-	ParallelTransform(p, 2, func(_ context.Context, x int) (*int, error) {
+	ParallelTransform("test-round-robin-transform2", p, 2, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(5 * time.Millisecond)
 		result := x * 200
 		return &result, nil
 	}, out2, processed2)
 
-	ParallelTransform(p, 2, func(_ context.Context, x int) (*int, error) {
+	ParallelTransform("test-round-robin-transform3", p, 2, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(5 * time.Millisecond)
 		result := x * 300
 		return &result, nil
 	}, out3, processed3)
 
-	FanIn(p, merged, processed1, processed2, processed3)
+	FanIn("test-round-robin-fan-in", p, merged, processed1, processed2, processed3)
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -1000,7 +1000,7 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 }
 
 func TestPipeline_WithError(t *testing.T) {
-	p, _ := WithPipeline(context.Background())
+	p, _ := WithPipeline(context.Background(), "test")
 	expectedError := errors.New("test error")
 
 	in := make(chan int, 10)
@@ -1013,7 +1013,7 @@ func TestPipeline_WithError(t *testing.T) {
 		close(in)
 	}()
 
-	Transform(p, func(_ context.Context, x int) (*int, error) {
+	Transform("test-with-error-transform", p, func(_ context.Context, x int) (*int, error) {
 		time.Sleep(10 * time.Millisecond)
 
 		if x == 5 {

@@ -6,6 +6,8 @@ A Go package for building concurrent data processing pipelines using channels.
 
 `pipeline` provides a set of composable stages for processing data streams concurrently. It handles context cancellation, error propagation, and goroutine lifecycle management automatically.
 
+All pipeline stages require a name parameter as their first argument. These names are used to create trace regions for performance analysis using Go's `runtime/trace` package. When creating a pipeline with `WithPipeline`, you also provide a name for the overall pipeline task.
+
 ## Installation
 
 ```bash
@@ -28,7 +30,7 @@ import (
 )
 
 func main() {
-	p, _ := pipeline.WithPipeline(context.Background())
+	p, _ := pipeline.WithPipeline(context.Background(), "example")
 
 	// Define some data to process
 	data := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
@@ -38,17 +40,17 @@ func main() {
 	out := make(chan int, len(data))
 
 	// Source: feed data into the pipeline from a slice
-	pipeline.SourceSlice(p, slices.Values(data), in)
+	pipeline.SourceSlice("source", p, slices.Values(data), in)
 
 	// Transform: multiply by 2
-	pipeline.Transform(p, func(ctx context.Context, x int) (*int, error) {
+	pipeline.Transform("multiply", p, func(ctx context.Context, x int) (*int, error) {
 		result := x * 2
 		return &result, nil
 	}, in, out)
 
 
 	// Read results
-	for v, err := range pipeline.Sink(p, out) {
+	for v, err := range pipeline.Sink("sink", p, out) {
         if err != nil {
             panic(err)
         }
@@ -70,7 +72,7 @@ Starts a pipeline from a fallible iterator (`iter.Seq2[T, error]`). If the itera
 var myIterator iter.Seq2[string, error] 
 
 out := make(chan string, 100)
-pipeline.Source(p, myIterator, out)
+pipeline.Source("my-source", p, myIterator, out)
 ```
 
 ### SourceSlice
@@ -82,7 +84,7 @@ data := []int{1, 2, 3, 4, 5}
 out := make(chan int, 5)
 
 // The iterator can be created from a slice using slices.Values
-pipeline.SourceSlice(p, slices.Values(data), out)
+pipeline.SourceSlice("source", p, slices.Values(data), out)
 ```
 
 ### Sink
@@ -91,7 +93,7 @@ The "opposite" of a source, `Sink` takes an input channel and returns an `iter.S
 
 ```go
 // Given 'out' is a channel from a pipeline stage...
-it := pipeline.Sink(p, out)
+it := pipeline.Sink("sink", p, out)
 
 // You can now iterate over the results.
 for v, err := range it {
@@ -108,7 +110,7 @@ for v, err := range it {
 Applies a transformation function to each value:
 
 ```go
-pipeline.Transform(p, func(ctx context.Context, x int) (*int, error) {
+pipeline.Transform("transform", p, func(ctx context.Context, x int) (*int, error) {
     result := x * 2
     return &result, nil
 }, in, out)
@@ -119,7 +121,7 @@ pipeline.Transform(p, func(ctx context.Context, x int) (*int, error) {
 Filters values based on a predicate:
 
 ```go
-pipeline.Filter(p, func(ctx context.Context, x int) (bool, error) {
+pipeline.Filter("filter", p, func(ctx context.Context, x int) (bool, error) {
     return x%2 == 0, nil
 }, in, out)
 ```
@@ -129,7 +131,7 @@ pipeline.Filter(p, func(ctx context.Context, x int) (bool, error) {
 Groups values into fixed-size batches:
 
 ```go
-pipeline.Batch(p, func(ctx context.Context, batch []int) (*int, error) {
+pipeline.Batch("batch", p, func(ctx context.Context, batch []int) (*int, error) {
     sum := 0
     for _, v := range batch {
         sum += v
@@ -143,7 +145,7 @@ pipeline.Batch(p, func(ctx context.Context, batch []int) (*int, error) {
 Applies transformation with concurrent workers:
 
 ```go
-pipeline.ParallelTransform(p, 5, func(ctx context.Context, x int) (*int, error) {
+pipeline.ParallelTransform("parallel-transform", p, 5, func(ctx context.Context, x int) (*int, error) {
     result := x * 2
     return &result, nil
 }, in, out)
@@ -154,7 +156,7 @@ pipeline.ParallelTransform(p, 5, func(ctx context.Context, x int) (*int, error) 
 Merges multiple input channels into one:
 
 ```go
-pipeline.FanIn(p, out, in1, in2, in3)
+pipeline.FanIn("fan-in", p, out, in1, in2, in3)
 ```
 
 ### FanOut
@@ -162,7 +164,7 @@ pipeline.FanIn(p, out, in1, in2, in3)
 Distributes values to multiple output channels (broadcast):
 
 ```go
-pipeline.FanOut(p, in, out1, out2, out3)
+pipeline.FanOut("fan-out", p, in, out1, out2, out3)
 ```
 
 ### FanOutRoundRobin
@@ -170,7 +172,7 @@ pipeline.FanOut(p, in, out1, out2, out3)
 Distributes values round-robin style:
 
 ```go
-pipeline.FanOutRoundRobin(p, in, out1, out2, out3)
+pipeline.FanOutRoundRobin("fan-out-round-robin", p, in, out1, out2, out3)
 ```
 
 ### Limit
@@ -178,7 +180,7 @@ pipeline.FanOutRoundRobin(p, in, out1, out2, out3)
 Limits the number of values passed through:
 
 ```go
-pipeline.Limit(p, 10, in, out)
+pipeline.Limit("limit", p, 10, in, out)
 ```
 
 ### Split
@@ -186,7 +188,7 @@ pipeline.Limit(p, 10, in, out)
 Routes values to different channels based on a selector:
 
 ```go
-pipeline.Split(p, func(ctx context.Context, x int) int {
+pipeline.Split("split", p, func(ctx context.Context, x int) int {
     return (x - 1) % 3
 }, in, out1, out2, out3)
 ```
@@ -196,7 +198,7 @@ pipeline.Split(p, func(ctx context.Context, x int) int {
 Collects all values into a single slice:
 
 ```go
-pipeline.Aggregate(p, in, out)
+pipeline.Aggregate("aggregate", p, in, out)
 ```
 
 ### Reduce
@@ -204,7 +206,7 @@ pipeline.Aggregate(p, in, out)
 Processes values incrementally using a reducer function, combining them with an accumulator. This allows aggregating results as they come in without keeping all values in memory:
 
 ```go
-pipeline.Reduce(p, 0, func(ctx context.Context, acc int, x int) (int, error) {
+pipeline.Reduce("reduce", p, 0, func(ctx context.Context, acc int, x int) (int, error) {
     return acc + x, nil
 }, in, out)
 ```
@@ -214,7 +216,7 @@ pipeline.Reduce(p, 0, func(ctx context.Context, acc int, x int) (int, error) {
 Takes an input channel of slices and emits each element of each slice as an individual item on the output channel:
 
 ```go
-pipeline.Flatten(p, in, out)
+pipeline.Flatten("flatten", p, in, out)
 ```
 
 ### Expand
@@ -222,7 +224,7 @@ pipeline.Flatten(p, in, out)
 Takes single input items from a channel and for each input, outputs multiple items of another type. The expander function returns an iterator (`iter.Seq2[Out, error]`) of output items for each input, allowing for lazy evaluation and avoiding loading all expanded items into memory at once:
 
 ```go
-pipeline.Expand(p, func(ctx context.Context, x int) iter.Seq2[string, error] {
+pipeline.Expand("expand", p, func(ctx context.Context, x int) iter.Seq2[string, error] {
     return func(yield func(string, error) bool) {
         yield(fmt.Sprintf("%d", x), nil)
         yield(fmt.Sprintf("%d", x*2), nil)

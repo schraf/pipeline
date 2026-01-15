@@ -3,7 +3,9 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
+	"runtime/trace"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -12,12 +14,13 @@ import (
 // to the output channel until the iterator is exhausted, an error occurs, or
 // the context is done. If the iterator returns an error, the pipeline is
 // cancelled.
-func Source[T any](p *Pipeline, seq iter.Seq2[T, error], out chan<- T) {
+func Source[T any](name string, p *Pipeline, seq iter.Seq2[T, error], out chan<- T) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		for v, err := range seq {
 			if err != nil {
@@ -36,12 +39,13 @@ func Source[T any](p *Pipeline, seq iter.Seq2[T, error], out chan<- T) {
 
 // SourceSlice reads values from the provided iterator and sends them to the
 // output channel until the iterator is exhausted or the context is done.
-func SourceSlice[T any](p *Pipeline, seq iter.Seq[T], out chan<- T) {
+func SourceSlice[T any](name string, p *Pipeline, seq iter.Seq[T], out chan<- T) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		// The yield function sends a value to the output channel. It returns false
 		// if the context is cancelled, which stops the iterator.
@@ -64,8 +68,10 @@ func SourceSlice[T any](p *Pipeline, seq iter.Seq[T], out chan<- T) {
 // iterator continues until the channel is closed or the pipeline's context is
 // cancelled. If the context is cancelled, the iterator yields a zero value for
 // T and the context's error.
-func Sink[T any](p *Pipeline, in <-chan T) iter.Seq2[T, error] {
+func Sink[T any](name string, p *Pipeline, in <-chan T) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
+		defer trace.StartRegion(p.ctx, name).End()
+
 		for {
 			select {
 			case <-p.ctx.Done():
@@ -92,12 +98,13 @@ func Sink[T any](p *Pipeline, in <-chan T) iter.Seq2[T, error] {
 // function, and forwards successful results to the output channel until the
 // context is done or the input channel is closed. The transformer must return
 // a non-nil pointer when err is nil, otherwise a panic will occur.
-func Transform[In any, Out any](p *Pipeline, transformer func(context.Context, In) (*Out, error), in <-chan In, out chan<- Out) {
+func Transform[In any, Out any](name string, p *Pipeline, transformer func(context.Context, In) (*Out, error), in <-chan In, out chan<- Out) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		for input := range in {
 			output, err := transformer(p.ctx, input)
@@ -125,12 +132,13 @@ func Transform[In any, Out any](p *Pipeline, transformer func(context.Context, I
 // which are all sent to the output channel. Processing continues until the
 // context is done or the input channel is closed. This allows for lazy evaluation
 // and avoids loading all expanded items into memory at once.
-func Expand[In any, Out any](p *Pipeline, expander func(context.Context, In) iter.Seq2[Out, error], in <-chan In, out chan<- Out) {
+func Expand[In any, Out any](name string, p *Pipeline, expander func(context.Context, In) iter.Seq2[Out, error], in <-chan In, out chan<- Out) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		for input := range in {
 			seq := expander(p.ctx, input)
@@ -154,12 +162,13 @@ func Expand[In any, Out any](p *Pipeline, expander func(context.Context, In) ite
 // Filter reads values from the input channel, applies the filter predicate,
 // and forwards only values that satisfy the predicate to the output channel.
 // It respects context cancellation and stops processing on error.
-func Filter[T any](p *Pipeline, filter func(context.Context, T) (bool, error), in <-chan T, out chan<- T) {
+func Filter[T any](name string, p *Pipeline, filter func(context.Context, T) (bool, error), in <-chan T, out chan<- T) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		for input := range in {
 			shouldForward, err := filter(p.ctx, input)
@@ -186,12 +195,13 @@ func Filter[T any](p *Pipeline, filter func(context.Context, T) (bool, error), i
 // channel. Any remaining items after the input channel closes are processed
 // as a final batch. The batcher must return a non-nil pointer when err is nil,
 // otherwise a panic will occur.
-func Batch[In any, Out any](p *Pipeline, batcher func(context.Context, []In) (*Out, error), batchSize int, in <-chan In, out chan<- Out) {
+func Batch[In any, Out any](name string, p *Pipeline, batcher func(context.Context, []In) (*Out, error), batchSize int, in <-chan In, out chan<- Out) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		batch := make([]In, 0, batchSize)
 
@@ -249,12 +259,13 @@ func Batch[In any, Out any](p *Pipeline, batcher func(context.Context, []In) (*O
 // FanIn merges multiple input channels into a single output channel,
 // forwarding all values from each input until the context is done or all
 // inputs are closed.
-func FanIn[T any](p *Pipeline, out chan<- T, in ...<-chan T) {
+func FanIn[T any](name string, p *Pipeline, out chan<- T, in ...<-chan T) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		group, ctx := errgroup.WithContext(p.ctx)
 
@@ -282,7 +293,7 @@ func FanIn[T any](p *Pipeline, out chan<- T, in ...<-chan T) {
 
 // FanOut distributes items from a single input channel to multiple output
 // channels, sending each item to all output channels.
-func FanOut[T any](p *Pipeline, in <-chan T, out ...chan<- T) {
+func FanOut[T any](name string, p *Pipeline, in <-chan T, out ...chan<- T) {
 	p.group.Add(1)
 
 	go func() {
@@ -292,6 +303,7 @@ func FanOut[T any](p *Pipeline, in <-chan T, out ...chan<- T) {
 			}
 		}()
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		group, ctx := errgroup.WithContext(p.ctx)
 
@@ -322,7 +334,7 @@ func FanOut[T any](p *Pipeline, in <-chan T, out ...chan<- T) {
 // FanOutRoundRobin distributes items from a single input channel to multiple
 // output channels using round-robin distribution, sending each item to only
 // one output channel. Panics if no output channels are provided.
-func FanOutRoundRobin[T any](p *Pipeline, in <-chan T, out ...chan<- T) {
+func FanOutRoundRobin[T any](name string, p *Pipeline, in <-chan T, out ...chan<- T) {
 	if len(out) == 0 {
 		panic("FanOutRoundRobin: at least one output channel required")
 	}
@@ -336,6 +348,8 @@ func FanOutRoundRobin[T any](p *Pipeline, in <-chan T, out ...chan<- T) {
 			}
 		}()
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
+
 		index := 0
 
 		for input := range in {
@@ -357,17 +371,20 @@ func FanOutRoundRobin[T any](p *Pipeline, in <-chan T, out ...chan<- T) {
 // successful results to the output channel until the context is done or the
 // input channel is closed. The transformer must return a non-nil pointer when
 // err is nil, otherwise a panic will occur.
-func ParallelTransform[In any, Out any](p *Pipeline, workers int, transformer func(context.Context, In) (*Out, error), in <-chan In, out chan<- Out) {
+func ParallelTransform[In any, Out any](name string, p *Pipeline, workers int, transformer func(context.Context, In) (*Out, error), in <-chan In, out chan<- Out) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		group, ctx := errgroup.WithContext(p.ctx)
 
 		for i := 0; i < workers; i++ {
 			group.Go(func() error {
+				defer trace.StartRegion(p.ctx, fmt.Sprintf("%s_%d", name, i)).End()
+
 				for {
 					var input In
 					var ok bool
@@ -407,12 +424,13 @@ func ParallelTransform[In any, Out any](p *Pipeline, workers int, transformer fu
 // Limit reads values from the input channel, forwards at most n values to the
 // output channel, and then returns. It respects context cancellation while
 // reading and forwarding values.
-func Limit[T any](p *Pipeline, n int, in <-chan T, out chan<- T) {
+func Limit[T any](name string, p *Pipeline, n int, in <-chan T, out chan<- T) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		if n <= 0 {
 			return
@@ -450,7 +468,7 @@ func Limit[T any](p *Pipeline, n int, in <-chan T, out chan<- T) {
 // provided output channels, as determined by the selector function. The
 // selector must return a valid index into the out slice. Panics if the
 // selector returns an invalid index.
-func Split[T any](p *Pipeline, selector func(context.Context, T) int, in <-chan T, out ...chan<- T) {
+func Split[T any](name string, p *Pipeline, selector func(context.Context, T) int, in <-chan T, out ...chan<- T) {
 	p.group.Add(1)
 
 	go func() {
@@ -460,6 +478,7 @@ func Split[T any](p *Pipeline, selector func(context.Context, T) int, in <-chan 
 			}
 		}()
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		for input := range in {
 			index := selector(p.ctx, input)
@@ -479,12 +498,13 @@ func Split[T any](p *Pipeline, selector func(context.Context, T) int, in <-chan 
 
 // Aggregate consumes all values from the input channel and sends the
 // collected slice of values as a single item on the output channel.
-func Aggregate[T any](p *Pipeline, in <-chan T, out chan<- []T) {
+func Aggregate[T any](name string, p *Pipeline, in <-chan T, out chan<- []T) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		inputs := []T{}
 
@@ -515,12 +535,13 @@ func Aggregate[T any](p *Pipeline, in <-chan T, out chan<- []T) {
 // as they come in without keeping all values in memory. The reducer function
 // takes the current accumulator and the next value, and returns the updated
 // accumulator. The final accumulated result is sent to the output channel.
-func Reduce[T any, Acc any](p *Pipeline, initial Acc, reducer func(context.Context, Acc, T) (Acc, error), in <-chan T, out chan<- Acc) {
+func Reduce[T any, Acc any](name string, p *Pipeline, initial Acc, reducer func(context.Context, Acc, T) (Acc, error), in <-chan T, out chan<- Acc) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		accumulator := initial
 
@@ -551,12 +572,13 @@ func Reduce[T any, Acc any](p *Pipeline, initial Acc, reducer func(context.Conte
 // Flatten takes an input channel of slices and emits each element of each
 // slice as an individual item on the output channel. It continues until the
 // input channel is closed or the context is cancelled.
-func Flatten[T any](p *Pipeline, in <-chan []T, out chan<- T) {
+func Flatten[T any](name string, p *Pipeline, in <-chan []T, out chan<- T) {
 	p.group.Add(1)
 
 	go func() {
 		defer close(out)
 		defer p.group.Done()
+		defer trace.StartRegion(p.ctx, name).End()
 
 		for slice := range in {
 			for _, item := range slice {

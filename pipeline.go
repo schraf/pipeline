@@ -16,9 +16,34 @@ type Pipe struct {
 	err   func(error)
 }
 
+type PipeInputs[T any] struct {
+	inputs []chan T
+}
+
+func (i *PipeInputs[T]) Input(index int) <-chan T {
+	return i.inputs[index]
+}
+
+type PipeOutputs[T any] struct {
+	outputs []chan T
+}
+
+func (o *PipeOutputs[T]) Output(index int) chan<- T {
+	return o.outputs[index]
+}
+
 // PipeExecutor defines the body of the pipeline. The function should connect
 // the input channel to the output channel using stages on the provided pipe.
-type PipelineExecutor[In any, Out any] func(*Pipe, <-chan In, chan<- Out)
+type PipelineExecutor[In any, Out any] func(*Pipe, PipeInputs[In], PipeOutputs[Out])
+
+type PipelineConfig[In any, Out any] struct {
+	Name             string
+	InputChannels    int
+	InputBufferSize  int
+	OutputChannels   int
+	OutputBufferSize int
+	Executor         PipelineExecutor[In, Out]
+}
 
 // Pipeline coordinates concurrent processing stages, managing their lifecycle
 // and propagating errors and cancellation signals across all stages.
@@ -29,16 +54,9 @@ type Pipeline[In any, Out any] struct {
 	errOnce  sync.Once
 	task     *trace.Task
 	err      error
-	input    chan In
-	output   chan Out
+	inputs   []chan In
+	outputs  []chan Out
 	executor PipelineExecutor[In, Out]
-}
-
-type PipelineConfig[In any, Out any] struct {
-	Name             string
-	InputBufferSize  int
-	OutputBufferSize int
-	Executor         PipelineExecutor[In, Out]
 }
 
 // NewPipeline creates a new Pipeline and a derived context for coordinating
@@ -48,22 +66,42 @@ func NewPipeline[In any, Out any](ctx context.Context, cfg PipelineConfig[In, Ou
 	ctx, task := trace.NewTask(ctx, cfg.Name)
 	ctx, cancel := context.WithCancelCause(ctx)
 
+	if cfg.InputChannels == 0 {
+		cfg.InputChannels = 1
+	}
+
+	if cfg.OutputChannels == 0 {
+		cfg.OutputChannels = 1
+	}
+
+	inputs := make([]chan In, cfg.InputChannels)
+
+	for index := range inputs {
+		inputs[index] = make(chan In, cfg.InputBufferSize)
+	}
+
+	outputs := make([]chan Out, cfg.OutputChannels)
+
+	for index := range outputs {
+		outputs[index] = make(chan Out, cfg.OutputBufferSize)
+	}
+
 	return &Pipeline[In, Out]{
 		cancel:   cancel,
 		ctx:      ctx,
 		task:     task,
-		input:    make(chan In, cfg.InputBufferSize),
-		output:   make(chan Out, cfg.OutputBufferSize),
+		inputs:   inputs,
+		outputs:  outputs,
 		executor: cfg.Executor,
 	}, ctx
 }
 
-func (p *Pipeline[In, Out]) Input() chan<- In {
-	return p.input
+func (p *Pipeline[In, Out]) Input(index int) chan<- In {
+	return p.inputs[index]
 }
 
-func (p *Pipeline[In, Out]) Output() <-chan Out {
-	return p.output
+func (p *Pipeline[In, Out]) Output(index int) <-chan Out {
+	return p.outputs[0]
 }
 
 func (p *Pipeline[In, Out]) Start() {
@@ -80,7 +118,10 @@ func (p *Pipeline[In, Out]) Start() {
 			},
 		}
 
-		p.executor(&pipe, p.input, p.output)
+		inputs := PipeInputs[In]{inputs: p.inputs}
+		outputs := PipeOutputs[Out]{outputs: p.outputs}
+
+		p.executor(&pipe, inputs, outputs)
 	}()
 }
 
@@ -88,7 +129,11 @@ func (p *Pipeline[In, Out]) Start() {
 // encountered by any stage, or nil if all stages completed successfully.
 func (p *Pipeline[In, Out]) Wait() error {
 	defer p.task.End()
-	close(p.input)
+
+	for _, input := range p.inputs {
+		close(input)
+	}
+
 	p.group.Wait()
 	return p.err
 }

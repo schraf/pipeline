@@ -13,21 +13,21 @@ func TestExpand_Success(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  1,
 		OutputBufferSize: 5,
-		Executor: func(pipe *Pipe, in PipeInputs[[]int], out PipeOutputs[int]) {
-			ExpandSlice("test-source", pipe, in.Input(0), out.Output(0))
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[[]int], out MultiChannelSender[int]) {
+			ExpandSlice("test-source", pipe, in.At(0), out.At(0))
 		},
 	}
 
 	data := []int{1, 2, 3, 4, 5}
 
 	p, _ := NewPipeline(context.Background(), cfg)
-	p.Input(0) <- data
+	p.Inputs().At(0) <- data
 	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range p.Output(0) {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -39,18 +39,18 @@ func TestTransform(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  5,
 		OutputBufferSize: 5,
-		Executor: func(pipe *Pipe, in PipeInputs[int], out PipeOutputs[int]) {
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
 			Transform("test-transform", pipe, func(ctx context.Context, x int) (*int, error) {
 				result := x * 2
 				return &result, nil
-			}, in.Input(0), out.Output(0))
+			}, in.At(0), out.At(0))
 		},
 	}
 
 	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 5; i++ {
-		p.Input(0) <- i
+		p.Inputs().At(0) <- i
 	}
 
 	p.Start()
@@ -58,7 +58,7 @@ func TestTransform(t *testing.T) {
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range p.Output(0) {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -71,17 +71,17 @@ func TestFilter(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  10,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in PipeInputs[int], out PipeOutputs[int]) {
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
 			Filter("test-filter", pipe, func(ctx context.Context, x int) (bool, error) {
 				return x%2 == 0, nil
-			}, in.Input(0), out.Output(0))
+			}, in.At(0), out.At(0))
 		},
 	}
 
 	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 10; i++ {
-		p.Input(0) <- i
+		p.Inputs().At(0) <- i
 	}
 
 	p.Start()
@@ -89,7 +89,7 @@ func TestFilter(t *testing.T) {
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range p.Output(0) {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -102,21 +102,21 @@ func TestBatch(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  10,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in PipeInputs[int], out PipeOutputs[int]) {
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
 			Batch("test-batch", pipe, func(ctx context.Context, batch []int) (*int, error) {
 				sum := 0
 				for _, v := range batch {
 					sum += v
 				}
 				return &sum, nil
-			}, 3, in.Input(0), out.Output(0))
+			}, 3, in.At(0), out.At(0))
 		},
 	}
 
 	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 7; i++ {
-		p.Input(0) <- i
+		p.Inputs().At(0) <- i
 	}
 
 	p.Start()
@@ -124,7 +124,7 @@ func TestBatch(t *testing.T) {
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range p.Output(0) {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 

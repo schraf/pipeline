@@ -16,26 +16,12 @@ type Pipe struct {
 	err   func(error)
 }
 
-type PipeInputs[T any] struct {
-	inputs []chan T
-}
-
-func (i *PipeInputs[T]) Input(index int) <-chan T {
-	return i.inputs[index]
-}
-
-type PipeOutputs[T any] struct {
-	outputs []chan T
-}
-
-func (o *PipeOutputs[T]) Output(index int) chan<- T {
-	return o.outputs[index]
-}
-
 // PipeExecutor defines the body of the pipeline. The function should connect
 // the input channel to the output channel using stages on the provided pipe.
-type PipelineExecutor[In any, Out any] func(*Pipe, PipeInputs[In], PipeOutputs[Out])
+type PipelineExecutor[In any, Out any] func(*Pipe, MultiChannelReceiver[In], MultiChannelSender[Out])
 
+// PipeConfig defines the make up of a pipeline and is required for
+// construction of it
 type PipelineConfig[In any, Out any] struct {
 	Name             string
 	InputChannels    int
@@ -96,12 +82,12 @@ func NewPipeline[In any, Out any](ctx context.Context, cfg PipelineConfig[In, Ou
 	}, ctx
 }
 
-func (p *Pipeline[In, Out]) Input(index int) chan<- In {
-	return p.inputs[index]
+func (p *Pipeline[In, Out]) Inputs() MultiChannelSender[In] {
+	return MultiChannelSender[In](p.inputs)
 }
 
-func (p *Pipeline[In, Out]) Output(index int) <-chan Out {
-	return p.outputs[0]
+func (p *Pipeline[In, Out]) Outputs() MultiChannelReceiver[Out] {
+	return MultiChannelReceiver[Out](p.outputs)
 }
 
 func (p *Pipeline[In, Out]) Start() {
@@ -118,8 +104,8 @@ func (p *Pipeline[In, Out]) Start() {
 			},
 		}
 
-		inputs := PipeInputs[In]{inputs: p.inputs}
-		outputs := PipeOutputs[Out]{outputs: p.outputs}
+		inputs := MultiChannelReceiver[In](p.inputs)
+		outputs := MultiChannelSender[Out](p.outputs)
 
 		p.executor(&pipe, inputs, outputs)
 	}()

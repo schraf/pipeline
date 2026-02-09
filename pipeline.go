@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"runtime/trace"
 	"sync"
 )
@@ -28,12 +29,14 @@ type PipelineConfig[In any, Out any] struct {
 	InputBufferSize  int
 	OutputChannels   int
 	OutputBufferSize int
+	StartImmediately bool
 	Executor         PipelineExecutor[In, Out]
 }
 
 // Pipeline coordinates concurrent processing stages, managing their lifecycle
 // and propagating errors and cancellation signals across all stages.
 type Pipeline[In any, Out any] struct {
+	state    *PipelineState
 	cancel   context.CancelCauseFunc
 	ctx      context.Context
 	group    sync.WaitGroup
@@ -72,14 +75,32 @@ func NewPipeline[In any, Out any](ctx context.Context, cfg PipelineConfig[In, Ou
 		outputs[index] = make(chan Out, cfg.OutputBufferSize)
 	}
 
-	return &Pipeline[In, Out]{
+	pipeline := &Pipeline[In, Out]{
+		state:    newPipelineState(),
 		cancel:   cancel,
 		ctx:      ctx,
 		task:     task,
 		inputs:   inputs,
 		outputs:  outputs,
 		executor: cfg.Executor,
-	}, ctx
+	}
+
+	if cfg.StartImmediately {
+		if err := pipeline.Start(); err != nil {
+			// we should always be able to start on creation of a new pipeline
+			panic("pipeline failed to start immediately")
+		}
+	}
+
+	return pipeline, ctx
+}
+
+func (p *Pipeline[In, Out]) State() *PipelineState {
+	return p.state
+}
+
+func (p *Pipeline[In, Out]) Context() context.Context {
+	return p.ctx
 }
 
 func (p *Pipeline[In, Out]) Inputs() MultiChannelSender[In] {
@@ -90,7 +111,11 @@ func (p *Pipeline[In, Out]) Outputs() MultiChannelReceiver[Out] {
 	return MultiChannelReceiver[Out](p.outputs)
 }
 
-func (p *Pipeline[In, Out]) Start() {
+func (p *Pipeline[In, Out]) Start() error {
+	if !p.state.set(StateCreated, StateStarted) {
+		return fmt.Errorf("unable to start pipeline, unexpected state: %s", p.state.String())
+	}
+
 	p.group.Add(1)
 
 	go func() {
@@ -109,6 +134,8 @@ func (p *Pipeline[In, Out]) Start() {
 
 		p.executor(&pipe, inputs, outputs)
 	}()
+
+	return nil
 }
 
 // CloseAllInputs will close all of the input channels
@@ -121,7 +148,12 @@ func (p *Pipeline[In, Out]) CloseAllInputs() {
 // Wait blocks until all registered stages complete and returns the first error
 // encountered by any stage, or nil if all stages completed successfully.
 func (p *Pipeline[In, Out]) Wait() error {
+	if !p.state.set(StateStarted, StateWaiting) {
+		return fmt.Errorf("unable to wait on pipeline, unexpected state: %s", p.state.String())
+	}
+
 	defer p.task.End()
+	defer p.state.value.Store(StateDone)
 	p.group.Wait()
 	return p.err
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"iter"
-	"slices"
 	"testing"
 	"time"
 
@@ -12,173 +11,60 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fallibleIterator returns an iterator that yields values from a slice and
-// then returns an error.
-func fallibleIterator[T any](data []T, err error) iter.Seq2[T, error] {
-	return func(yield func(T, error) bool) {
-		for _, v := range data {
-			if !yield(v, nil) {
-				return
-			}
-		}
-		if err != nil {
-			yield(*new(T), err)
-		}
+func TestExpand_Success(t *testing.T) {
+	cfg := PipelineConfig[[]int, int]{
+		Name:             "test",
+		InputBufferSize:  1,
+		OutputBufferSize: 5,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[[]int], out MultiChannelSender[int]) {
+			ExpandSlice("test-source", pipe, in.At(0), out.At(0))
+		},
 	}
-}
 
-func TestSource_Success(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
-
-	out := make(chan int, 5)
 	data := []int{1, 2, 3, 4, 5}
 
-	Source("test-source", p, fallibleIterator(data, nil), out)
+	p, _ := NewPipeline(context.Background(), cfg)
+	p.Inputs().At(0) <- data
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range out {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
 	assert.Equal(t, data, results)
-}
-
-func TestSource_Error(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
-
-	out := make(chan int, 5)
-	data := []int{1, 2, 3}
-	expectedErr := errors.New("iterator error")
-
-	Source("test-source-error", p, fallibleIterator(data, expectedErr), out)
-
-	err := p.Wait()
-	require.ErrorIs(t, err, expectedErr)
-
-	// Collect whatever made it out before the error
-	var results []int
-	for v := range out {
-		results = append(results, v)
-	}
-
-	// Check that we got the data before the error
-	assert.Equal(t, data, results)
-}
-
-func TestSourceSlice(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
-
-	out := make(chan int, 5)
-	data := []int{1, 2, 3, 4, 5}
-
-	SourceSlice("test-source-slice", p, slices.Values(data), out)
-
-	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
-
-	var results []int
-	for v := range out {
-		results = append(results, v)
-	}
-
-	assert.Equal(t, data, results)
-}
-
-func TestSink_Success(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
-
-	in := make(chan int, 5)
-	data := []int{1, 2, 3, 4, 5}
-
-	SourceSlice("test-source-slice", p, slices.Values(data), in)
-
-	it := Sink("test-sink", p, in)
-
-	waitErrCh := make(chan error)
-	go func() {
-		waitErrCh <- p.Wait()
-	}()
-
-	var results []int
-	for v, err := range it {
-		require.NoError(t, err)
-		results = append(results, v)
-	}
-
-	assert.Equal(t, data, results)
-
-	err := <-waitErrCh
-	require.NoError(t, err)
-}
-
-func TestSink_ErrorMidStream(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
-	expectedErr := errors.New("mid-stream error")
-
-	in := make(chan int) // unbuffered
-
-	// Custom source that sends 1, then errors.
-	p.group.Add(1)
-	go func() {
-		defer p.group.Done()
-		defer close(in)
-
-		// Send 1
-		select {
-		case in <- 1:
-		case <-p.ctx.Done():
-			return
-		}
-
-		// Then error
-		p.setError(expectedErr)
-	}()
-
-	it := Sink("test-sink", p, in)
-
-	waitErr := make(chan error)
-	go func() {
-		waitErr <- p.Wait()
-	}()
-
-	var results []int
-	var iterErr error
-	for v, err := range it {
-		if err != nil {
-			iterErr = err
-			break
-		}
-		results = append(results, v)
-	}
-
-	err := <-waitErr
-	require.ErrorIs(t, err, expectedErr)
-
-	assert.Equal(t, []int{1}, results)
-	require.ErrorIs(t, iterErr, context.Canceled)
 }
 
 func TestTransform(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  5,
+		OutputBufferSize: 5,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			Transform("test-transform", pipe, func(ctx context.Context, x int) (*int, error) {
+				result := x * 2
+				return &result, nil
+			}, in.At(0), out.At(0))
+		},
+	}
 
-	in := make(chan int, 5)
-	out := make(chan int, 5)
+	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 5; i++ {
-		in <- i
+		p.Inputs().At(0) <- i
 	}
-	close(in)
 
-	Transform("test-transform", p, func(_ context.Context, x int) (*int, error) {
-		result := x * 2
-		return &result, nil
-	}, in, out)
+	p.CloseAllInputs()
+
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range out {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -187,24 +73,31 @@ func TestTransform(t *testing.T) {
 }
 
 func TestFilter(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  10,
+		OutputBufferSize: 10,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			Filter("test-filter", pipe, func(ctx context.Context, x int) (bool, error) {
+				return x%2 == 0, nil
+			}, in.At(0), out.At(0))
+		},
+	}
 
-	in := make(chan int, 10)
-	out := make(chan int, 10)
+	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 10; i++ {
-		in <- i
+		p.Inputs().At(0) <- i
 	}
-	close(in)
 
-	Filter("test-filter", p, func(_ context.Context, x int) (bool, error) {
-		return x%2 == 0, nil
-	}, in, out)
+	p.CloseAllInputs()
+
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range out {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -213,28 +106,36 @@ func TestFilter(t *testing.T) {
 }
 
 func TestBatch(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  10,
+		OutputBufferSize: 10,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			Batch("test-batch", pipe, func(ctx context.Context, batch []int) (*int, error) {
+				sum := 0
+				for _, v := range batch {
+					sum += v
+				}
 
-	in := make(chan int, 10)
-	out := make(chan int, 10)
+				return &sum, nil
+			}, 3, in.At(0), out.At(0))
+		},
+	}
+
+	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 7; i++ {
-		in <- i
+		p.Inputs().At(0) <- i
 	}
-	close(in)
 
-	Batch("test-batch", p, func(_ context.Context, batch []int) (*int, error) {
-		sum := 0
-		for _, v := range batch {
-			sum += v
-		}
-		return &sum, nil
-	}, 3, in, out)
+	p.CloseAllInputs()
+
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range out {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -244,34 +145,31 @@ func TestBatch(t *testing.T) {
 }
 
 func TestFanIn(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputChannels:    3,
+		InputBufferSize:  3,
+		OutputBufferSize: 10,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			FanIn("test-fan-in", pipe, out.At(0), in.At(0), in.At(1), in.At(2))
+		},
+	}
 
-	in1 := make(chan int, 3)
-	in2 := make(chan int, 3)
-	in3 := make(chan int, 3)
-	out := make(chan int, 10)
+	ctx := context.Background()
 
-	in1 <- 1
-	in1 <- 2
-	in1 <- 3
-	close(in1)
+	p, _ := NewPipeline(ctx, cfg)
 
-	in2 <- 4
-	in2 <- 5
-	in2 <- 6
-	close(in2)
+	p.Inputs().Send(ctx, 0, 1, 2, 3)
+	p.Inputs().Send(ctx, 1, 4, 5, 6)
+	p.Inputs().Send(ctx, 2, 7, 8, 9)
+	p.CloseAllInputs()
 
-	in3 <- 7
-	in3 <- 8
-	in3 <- 9
-	close(in3)
-
-	FanIn("test-fan-in", p, out, in1, in2, in3)
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range out {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -282,23 +180,31 @@ func TestFanIn(t *testing.T) {
 		assert.Truef(t, expected[v], "unexpected value: %d", v)
 		delete(expected, v)
 	}
+
 	assert.Empty(t, expected, "missing values")
 }
 
 func TestFanOut(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputChannels:    1,
+		InputBufferSize:  3,
+		OutputChannels:   3,
+		OutputBufferSize: 3,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			FanOut("test-fan-out", pipe, in.At(0), out.At(0), out.At(1), out.At(2))
+		},
+	}
 
-	in := make(chan int, 3)
-	out1 := make(chan int, 3)
-	out2 := make(chan int, 3)
-	out3 := make(chan int, 3)
+	ctx := context.Background()
 
-	in <- 1
-	in <- 2
-	in <- 3
-	close(in)
+	p, _ := NewPipeline(ctx, cfg)
 
-	FanOut("test-fan-out", p, in, out1, out2, out3)
+	p.Inputs().Send(ctx, 0, 1, 2, 3)
+
+	p.CloseAllInputs()
+
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
@@ -314,57 +220,68 @@ func TestFanOut(t *testing.T) {
 				return
 			}
 		}
+
 		assert.Len(t, results, count, "%s: unexpected number of results", name)
 		expectedSet := map[int]bool{1: true, 2: true, 3: true}
+
 		for _, v := range results {
 			assert.Truef(t, expectedSet[v], "%s: unexpected value: %d", name, v)
 			delete(expectedSet, v)
 		}
+
 		assert.Empty(t, expectedSet, "%s: missing values", name)
 	}
 
-	checkOutput(out1, "out1", 3)
-	checkOutput(out2, "out2", 3)
-	checkOutput(out3, "out3", 3)
+	checkOutput(p.Outputs().At(0), "out0", 3)
+	checkOutput(p.Outputs().At(1), "out1", 3)
+	checkOutput(p.Outputs().At(2), "out2", 3)
 }
 
 func TestFanOutRoundRobin(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputChannels:    1,
+		InputBufferSize:  6,
+		OutputChannels:   3,
+		OutputBufferSize: 3,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			FanOutRoundRobin("test-fan-out-round-robin", pipe, in.At(0), out.At(0), out.At(1), out.At(2))
+		},
+	}
 
-	in := make(chan int, 6)
-	out1 := make(chan int, 3)
-	out2 := make(chan int, 3)
-	out3 := make(chan int, 3)
+	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 6; i++ {
-		in <- i
+		p.Inputs().At(0) <- i
 	}
-	close(in)
 
-	FanOutRoundRobin("test-fan-out-round-robin", p, in, out1, out2, out3)
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results1, results2, results3 []int
 	for i := 0; i < 2; i++ {
 		select {
-		case v := <-out1:
+		case v := <-p.Outputs().At(0):
 			results1 = append(results1, v)
 		case <-time.After(1 * time.Second):
 			require.Fail(t, "timeout waiting for out1")
 		}
 	}
+
 	for i := 0; i < 2; i++ {
 		select {
-		case v := <-out2:
+		case v := <-p.Outputs().At(1):
 			results2 = append(results2, v)
 		case <-time.After(1 * time.Second):
 			require.Fail(t, "timeout waiting for out2")
 		}
 	}
+
 	for i := 0; i < 2; i++ {
 		select {
-		case v := <-out3:
+		case v := <-p.Outputs().At(2):
 			results3 = append(results3, v)
 		case <-time.After(1 * time.Second):
 			require.Fail(t, "timeout waiting for out3")
@@ -381,26 +298,32 @@ func TestFanOutRoundRobin(t *testing.T) {
 }
 
 func TestParallelTransform(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  10,
+		OutputBufferSize: 10,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			ParallelTransform("test-parallel-transform", pipe, 3, func(_ context.Context, x int) (*int, error) {
+				time.Sleep(10 * time.Millisecond)
+				result := x * 2
+				return &result, nil
+			}, in.At(0), out.At(0))
+		},
+	}
 
-	in := make(chan int, 10)
-	out := make(chan int, 10)
+	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 10; i++ {
-		in <- i
+		p.Inputs().At(0) <- i
 	}
-	close(in)
 
-	ParallelTransform("test-parallel-transform", p, 3, func(_ context.Context, x int) (*int, error) {
-		time.Sleep(10 * time.Millisecond)
-		result := x * 2
-		return &result, nil
-	}, in, out)
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range out {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -410,30 +333,38 @@ func TestParallelTransform(t *testing.T) {
 	for i := 1; i <= 10; i++ {
 		expected[i*2] = true
 	}
+
 	for _, v := range results {
 		assert.Truef(t, expected[v], "unexpected value: %d", v)
 		delete(expected, v)
 	}
+
 	assert.Empty(t, expected, "missing values")
 }
 
 func TestLimit(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  10,
+		OutputBufferSize: 5,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			Limit("test-limit", pipe, 5, in.At(0), out.At(0))
+		},
+	}
 
-	in := make(chan int, 10)
-	out := make(chan int, 5)
+	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 10; i++ {
-		in <- i
+		p.Inputs().At(0) <- i
 	}
-	close(in)
 
-	Limit("test-limit", p, 5, in, out)
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range out {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -442,44 +373,51 @@ func TestLimit(t *testing.T) {
 }
 
 func TestSplit(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  6,
+		OutputChannels:   3,
+		OutputBufferSize: 3,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			Split("test-split", pipe, func(_ context.Context, x int) int {
+				return (x - 1) % 3
+			}, in.At(0), out.At(0), out.At(1), out.At(2))
+		},
+	}
 
-	in := make(chan int, 6)
-	out1 := make(chan int, 3)
-	out2 := make(chan int, 3)
-	out3 := make(chan int, 3)
+	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 6; i++ {
-		in <- i
+		p.Inputs().At(0) <- i
 	}
-	close(in)
 
-	Split("test-split", p, func(_ context.Context, x int) int {
-		return (x - 1) % 3
-	}, in, out1, out2, out3)
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results1, results2, results3 []int
 	for i := 0; i < 2; i++ {
 		select {
-		case v := <-out1:
+		case v := <-p.Outputs().At(0):
 			results1 = append(results1, v)
 		case <-time.After(1 * time.Second):
 			require.Fail(t, "timeout waiting for out1")
 		}
 	}
+
 	for i := 0; i < 2; i++ {
 		select {
-		case v := <-out2:
+		case v := <-p.Outputs().At(1):
 			results2 = append(results2, v)
 		case <-time.After(1 * time.Second):
 			require.Fail(t, "timeout waiting for out2")
 		}
 	}
+
 	for i := 0; i < 2; i++ {
 		select {
-		case v := <-out3:
+		case v := <-p.Outputs().At(2):
 			results3 = append(results3, v)
 		case <-time.After(1 * time.Second):
 			require.Fail(t, "timeout waiting for out3")
@@ -496,114 +434,138 @@ func TestSplit(t *testing.T) {
 }
 
 func TestAggregate(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, []int]{
+		Name:             "test",
+		InputBufferSize:  5,
+		OutputBufferSize: 1,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[[]int]) {
+			Aggregate("test-aggregate", pipe, in.At(0), out.At(0))
+		},
+	}
 
-	in := make(chan int, 5)
-	out := make(chan []int, 1)
+	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 5; i++ {
-		in <- i
+		p.Inputs().At(0) <- i
 	}
-	close(in)
 
-	Aggregate("test-aggregate", p, in, out)
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
-	result := <-out
+	result := <-p.Outputs().At(0)
 	expected := []int{1, 2, 3, 4, 5}
 	assert.Equal(t, expected, result)
 }
 
 func TestReduce_Sum(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  5,
+		OutputBufferSize: 1,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			Reduce("test-reduce-sum", pipe, 0, func(_ context.Context, acc int, val int) (int, error) {
+				return acc + val, nil
+			}, in.At(0), out.At(0))
+		},
+	}
 
-	in := make(chan int, 5)
-	out := make(chan int, 1)
+	p, _ := NewPipeline(context.Background(), cfg)
 
 	for i := 1; i <= 5; i++ {
-		in <- i
+		p.Inputs().At(0) <- i
 	}
-	close(in)
 
-	Reduce("test-reduce-sum", p, 0, func(_ context.Context, acc int, val int) (int, error) {
-		return acc + val, nil
-	}, in, out)
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
-	result := <-out
+	result := <-p.Outputs().At(0)
 	expected := 15 // 1+2+3+4+5
 	assert.Equal(t, expected, result)
 }
 
 func TestReduce_StringConcatenation(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
-
-	in := make(chan string, 4)
-	out := make(chan string, 1)
-
-	words := []string{"hello", " ", "world", "!"}
-	for _, word := range words {
-		in <- word
+	cfg := PipelineConfig[string, string]{
+		Name:             "test",
+		InputBufferSize:  4,
+		OutputBufferSize: 1,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[string], out MultiChannelSender[string]) {
+			Reduce("test-reduce-string", pipe, "", func(_ context.Context, acc string, val string) (string, error) {
+				return acc + val, nil
+			}, in.At(0), out.At(0))
+		},
 	}
-	close(in)
 
-	Reduce("test-reduce-string", p, "", func(_ context.Context, acc string, val string) (string, error) {
-		return acc + val, nil
-	}, in, out)
+	ctx := context.Background()
+
+	p, _ := NewPipeline(ctx, cfg)
+
+	p.Inputs().Send(ctx, 0, "hello", " ", "world", "!")
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
-	result := <-out
+	result := <-p.Outputs().At(0)
 	expected := "hello world!"
 	assert.Equal(t, expected, result)
 }
 
 func TestReduce_MaxValue(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
-
-	in := make(chan int, 6)
-	out := make(chan int, 1)
-
-	values := []int{3, 7, 2, 9, 1, 5}
-	for _, val := range values {
-		in <- val
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  6,
+		OutputBufferSize: 1,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			Reduce("test-reduce-max", pipe, 0, func(_ context.Context, acc int, val int) (int, error) {
+				if val > acc {
+					return val, nil
+				}
+				return acc, nil
+			}, in.At(0), out.At(0))
+		},
 	}
-	close(in)
 
-	Reduce("test-reduce-max", p, 0, func(_ context.Context, acc int, val int) (int, error) {
-		if val > acc {
-			return val, nil
-		}
-		return acc, nil
-	}, in, out)
+	ctx := context.Background()
+
+	p, _ := NewPipeline(ctx, cfg)
+
+	p.Inputs().Send(ctx, 0, 3, 7, 2, 9, 1, 5)
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
-	result := <-out
+	result := <-p.Outputs().At(0)
 	expected := 9
 	assert.Equal(t, expected, result)
 }
 
 func TestFlatten(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[[]int, int]{
+		Name:             "test",
+		InputBufferSize:  3,
+		OutputBufferSize: 10,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[[]int], out MultiChannelSender[int]) {
+			Flatten("test-flatten", pipe, in.At(0), out.At(0))
+		},
+	}
 
-	in := make(chan []int, 3)
-	out := make(chan int, 10)
+	ctx := context.Background()
 
-	// Send some slices
-	in <- []int{1, 2}
-	in <- []int{3, 4, 5}
-	in <- []int{6}
-	close(in)
+	p, _ := NewPipeline(ctx, cfg)
 
-	Flatten("test-flatten", p, in, out)
+	p.Inputs().Send(ctx, 0, []int{1, 2}, []int{3, 4, 5}, []int{6})
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range out {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -612,29 +574,34 @@ func TestFlatten(t *testing.T) {
 }
 
 func TestExpand(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
-
-	in := make(chan int, 3)
-	out := make(chan int, 10)
-
-	for i := 1; i <= 3; i++ {
-		in <- i
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  3,
+		OutputBufferSize: 10,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			Expand("test-expand", pipe, func(_ context.Context, x int) iter.Seq2[int, error] {
+				// For each input, output x, x*2, x*3
+				return func(yield func(int, error) bool) {
+					yield(x, nil)
+					yield(x*2, nil)
+					yield(x*3, nil)
+				}
+			}, in.At(0), out.At(0))
+		},
 	}
-	close(in)
 
-	Expand("test-expand", p, func(_ context.Context, x int) iter.Seq2[int, error] {
-		// For each input, output x, x*2, x*3
-		return func(yield func(int, error) bool) {
-			yield(x, nil)
-			yield(x*2, nil)
-			yield(x*3, nil)
-		}
-	}, in, out)
+	ctx := context.Background()
+
+	p, _ := NewPipeline(ctx, cfg)
+
+	p.Inputs().Send(ctx, 0, 1, 2, 3)
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range out {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -645,36 +612,41 @@ func TestExpand(t *testing.T) {
 // End-to-end tests
 
 func TestPipeline_TransformFilterLimit(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  20,
+		OutputBufferSize: 10,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			// Pipeline: Transform -> Filter -> Limit
+			transformed := make(chan int, 20)
+			filtered := make(chan int, 20)
 
-	// Pipeline: Transform -> Filter -> Limit
-	in := make(chan int, 20)
-	transformed := make(chan int, 20)
-	filtered := make(chan int, 20)
-	out := make(chan int, 10)
+			Transform("test-transform-filter-limit-transform", pipe, func(_ context.Context, x int) (*int, error) {
+				result := x * 2
+				return &result, nil
+			}, in.At(0), transformed)
 
-	go func() {
-		for i := 1; i <= 20; i++ {
-			in <- i
-		}
-		close(in)
-	}()
+			Filter("test-transform-filter-limit-filter", pipe, func(_ context.Context, x int) (bool, error) {
+				return x > 20, nil
+			}, transformed, filtered)
 
-	Transform("test-transform-filter-limit-transform", p, func(_ context.Context, x int) (*int, error) {
-		result := x * 2
-		return &result, nil
-	}, in, transformed)
+			Limit("test-transform-filter-limit-limit", pipe, 5, filtered, out.At(0))
+		},
+	}
 
-	Filter("test-transform-filter-limit-filter", p, func(_ context.Context, x int) (bool, error) {
-		return x > 20, nil
-	}, transformed, filtered)
+	p, _ := NewPipeline(context.Background(), cfg)
 
-	Limit("test-transform-filter-limit-limit", p, 5, filtered, out)
+	for i := 1; i <= 20; i++ {
+		p.Inputs().At(0) <- i
+	}
+
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range out {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -687,34 +659,39 @@ func TestPipeline_TransformFilterLimit(t *testing.T) {
 }
 
 func TestPipeline_ParallelTransformBatch(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, []int]{
+		Name:             "test",
+		InputBufferSize:  30,
+		OutputBufferSize: 10,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[[]int]) {
+			// Pipeline: ParallelTransform -> Batch
+			transformed := make(chan int, 30)
 
-	// Pipeline: ParallelTransform -> Batch
-	in := make(chan int, 30)
-	transformed := make(chan int, 30)
-	batched := make(chan []int, 10)
+			ParallelTransform("test-parallel-transform-batch-transform", pipe, 5, func(_ context.Context, x int) (*int, error) {
+				time.Sleep(5 * time.Millisecond)
+				result := x * 3
+				return &result, nil
+			}, in.At(0), transformed)
 
-	go func() {
-		for i := 1; i <= 30; i++ {
-			in <- i
-		}
-		close(in)
-	}()
+			Batch("test-parallel-transform-batch-batch", pipe, func(_ context.Context, batch []int) (*[]int, error) {
+				return &batch, nil
+			}, 5, transformed, out.At(0))
+		},
+	}
 
-	ParallelTransform("test-parallel-transform-batch-transform", p, 5, func(_ context.Context, x int) (*int, error) {
-		time.Sleep(5 * time.Millisecond)
-		result := x * 3
-		return &result, nil
-	}, in, transformed)
+	p, _ := NewPipeline(context.Background(), cfg)
 
-	Batch("test-parallel-transform-batch-batch", p, func(_ context.Context, batch []int) (*[]int, error) {
-		return &batch, nil
-	}, 5, transformed, batched)
+	for i := 1; i <= 30; i++ {
+		p.Inputs().At(0) <- i
+	}
+
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var batches [][]int
-	for batch := range batched {
+	for batch := range p.Outputs().At(0) {
 		batches = append(batches, batch)
 	}
 
@@ -724,6 +701,7 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 	// Each batch should have 5 items
 	for i, batch := range batches {
 		assert.Lenf(t, batch, 5, "batch %d: expected 5 items", i)
+
 		// All values should be multiples of 3
 		for _, v := range batch {
 			assert.Equalf(t, 0, v%3, "batch %d: expected all values to be multiples of 3, got %d", i, v)
@@ -732,51 +710,42 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 }
 
 func TestPipeline_FanInTransformFanOut(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputChannels:    3,
+		InputBufferSize:  5,
+		OutputChannels:   2,
+		OutputBufferSize: 15,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			merged := make(chan int, 15)
+			transformed := make(chan int, 15)
 
-	// Pipeline: FanIn -> Transform -> FanOut
-	in1 := make(chan int, 5)
-	in2 := make(chan int, 5)
-	in3 := make(chan int, 5)
-	merged := make(chan int, 15)
-	transformed := make(chan int, 15)
-	out1 := make(chan int, 15)
-	out2 := make(chan int, 15)
+			FanIn("test-fan-in-transform-fan-out-fan-in", pipe, merged, in.At(0), in.At(1), in.At(2))
 
-	go func() {
-		for i := 1; i <= 5; i++ {
-			in1 <- i
-		}
-		close(in1)
-	}()
+			Transform("test-fan-in-transform-fan-out-transform", pipe, func(_ context.Context, x int) (*int, error) {
+				result := x * 2
+				return &result, nil
+			}, merged, transformed)
 
-	go func() {
-		for i := 6; i <= 10; i++ {
-			in2 <- i
-		}
-		close(in2)
-	}()
+			FanOut("test-fan-in-transform-fan-out-fan-out", pipe, transformed, out.At(0), out.At(1))
+		},
+	}
 
-	go func() {
-		for i := 11; i <= 15; i++ {
-			in3 <- i
-		}
-		close(in3)
-	}()
+	ctx := context.Background()
 
-	FanIn("test-fan-in-transform-fan-out-fan-in", p, merged, in1, in2, in3)
+	p, _ := NewPipeline(ctx, cfg)
 
-	Transform("test-fan-in-transform-fan-out-transform", p, func(_ context.Context, x int) (*int, error) {
-		result := x * 2
-		return &result, nil
-	}, merged, transformed)
-
-	FanOut("test-fan-in-transform-fan-out-fan-out", p, transformed, out1, out2)
+	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5)
+	p.Inputs().Send(ctx, 1, 6, 7, 8, 9, 10)
+	p.Inputs().Send(ctx, 2, 11, 12, 13, 14, 15)
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	checkOutput := func(ch <-chan int, name string, count int) {
 		t.Helper()
+
 		var results []int
 		for i := 0; i < count; i++ {
 			select {
@@ -787,7 +756,9 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 				return
 			}
 		}
+
 		assert.Lenf(t, results, count, "%s: unexpected number of results", name)
+
 		// All values should be even and in range [2, 30]
 		for _, v := range results {
 			assert.Equalf(t, 0, v%2, "%s: expected all values to be even, got %d", name, v)
@@ -796,55 +767,59 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 		}
 	}
 
-	checkOutput(out1, "out1", 15)
-	checkOutput(out2, "out2", 15)
+	checkOutput(p.Outputs().At(0), "out1", 15)
+	checkOutput(p.Outputs().At(1), "out2", 15)
 }
 
 func TestPipeline_SplitTransformFanIn(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  12,
+		OutputBufferSize: 18,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			out1 := make(chan int, 6)
+			out2 := make(chan int, 6)
+			out3 := make(chan int, 6)
+			transformed1 := make(chan int, 6)
+			transformed2 := make(chan int, 6)
+			transformed3 := make(chan int, 6)
 
-	// Pipeline: Split -> Transform (on each branch) -> FanIn
-	in := make(chan int, 12)
-	out1 := make(chan int, 6)
-	out2 := make(chan int, 6)
-	out3 := make(chan int, 6)
-	transformed1 := make(chan int, 6)
-	transformed2 := make(chan int, 6)
-	transformed3 := make(chan int, 6)
-	merged := make(chan int, 18)
+			Split("test-split-transform-fan-in-split", pipe, func(_ context.Context, x int) int {
+				return (x - 1) % 3
+			}, in.At(0), out1, out2, out3)
 
-	go func() {
-		for i := 1; i <= 12; i++ {
-			in <- i
-		}
-		close(in)
-	}()
+			Transform("test-split-transform-fan-in-transform1", pipe, func(_ context.Context, x int) (*int, error) {
+				result := x * 10
+				return &result, nil
+			}, out1, transformed1)
 
-	Split("test-split-transform-fan-in-split", p, func(_ context.Context, x int) int {
-		return (x - 1) % 3
-	}, in, out1, out2, out3)
+			Transform("test-split-transform-fan-in-transform2", pipe, func(_ context.Context, x int) (*int, error) {
+				result := x * 20
+				return &result, nil
+			}, out2, transformed2)
 
-	Transform("test-split-transform-fan-in-transform1", p, func(_ context.Context, x int) (*int, error) {
-		result := x * 10
-		return &result, nil
-	}, out1, transformed1)
+			Transform("test-split-transform-fan-in-transform3", pipe, func(_ context.Context, x int) (*int, error) {
+				result := x * 30
+				return &result, nil
+			}, out3, transformed3)
 
-	Transform("test-split-transform-fan-in-transform2", p, func(_ context.Context, x int) (*int, error) {
-		result := x * 20
-		return &result, nil
-	}, out2, transformed2)
+			FanIn("test-split-transform-fan-in-fan-in", pipe, out.At(0), transformed1, transformed2, transformed3)
+		},
+	}
 
-	Transform("test-split-transform-fan-in-transform3", p, func(_ context.Context, x int) (*int, error) {
-		result := x * 30
-		return &result, nil
-	}, out3, transformed3)
+	p, _ := NewPipeline(context.Background(), cfg)
 
-	FanIn("test-split-transform-fan-in-fan-in", p, merged, transformed1, transformed2, transformed3)
+	for i := 1; i <= 12; i++ {
+		p.Inputs().At(0) <- i
+	}
+
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range merged {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -857,71 +832,78 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 		160: 1, 220: 1, // from out2
 		90: 1, 180: 1, 270: 1, 360: 1, // from out3
 	}
+
 	actualCounts := make(map[int]int)
 	for _, v := range results {
 		actualCounts[v]++
 	}
+
 	for val, expectedCount := range expectedCounts {
 		assert.Equalf(t, expectedCount, actualCounts[val], "value %d: unexpected count", val)
 	}
 }
 
 func TestPipeline_ComplexMultiStage(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  50,
+		OutputBufferSize: 10,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			// Complex pipeline: Filter -> Transform -> Batch -> Transform -> Filter -> Limit
+			stage2 := make(chan int, 50)
+			stage3 := make(chan int, 50)
+			stage4 := make(chan []int, 20)
+			stage5 := make(chan int, 20)
+			stage6 := make(chan int, 20)
 
-	// Complex pipeline: Filter -> Transform -> Batch -> Transform -> Filter -> Limit
-	stage1 := make(chan int, 50)
-	stage2 := make(chan int, 50)
-	stage3 := make(chan int, 50)
-	stage4 := make(chan []int, 20)
-	stage5 := make(chan int, 20)
-	stage6 := make(chan int, 20)
-	stage7 := make(chan int, 10)
+			// Stage 1: Filter evens
+			Filter("test-complex-filter1", pipe, func(_ context.Context, x int) (bool, error) {
+				return x%2 == 0, nil
+			}, in.At(0), stage2)
 
-	go func() {
-		for i := 1; i <= 50; i++ {
-			stage1 <- i
-		}
-		close(stage1)
-	}()
+			// Stage 2: Transform (multiply by 3)
+			Transform("test-complex-transform1", pipe, func(_ context.Context, x int) (*int, error) {
+				result := x * 3
+				return &result, nil
+			}, stage2, stage3)
 
-	// Stage 1: Filter evens
-	Filter("test-complex-filter1", p, func(_ context.Context, x int) (bool, error) {
-		return x%2 == 0, nil
-	}, stage1, stage2)
+			// Stage 3: Batch into groups of 4
+			Batch("test-complex-batch", pipe, func(_ context.Context, batch []int) (*[]int, error) {
+				return &batch, nil
+			}, 4, stage3, stage4)
 
-	// Stage 2: Transform (multiply by 3)
-	Transform("test-complex-transform1", p, func(_ context.Context, x int) (*int, error) {
-		result := x * 3
-		return &result, nil
-	}, stage2, stage3)
+			// Stage 4: Transform batches (sum)
+			Transform("test-complex-transform2", pipe, func(_ context.Context, batch []int) (*int, error) {
+				sum := 0
+				for _, v := range batch {
+					sum += v
+				}
 
-	// Stage 3: Batch into groups of 4
-	Batch("test-complex-batch", p, func(_ context.Context, batch []int) (*[]int, error) {
-		return &batch, nil
-	}, 4, stage3, stage4)
+				return &sum, nil
+			}, stage4, stage5)
 
-	// Stage 4: Transform batches (sum)
-	Transform("test-complex-transform2", p, func(_ context.Context, batch []int) (*int, error) {
-		sum := 0
-		for _, v := range batch {
-			sum += v
-		}
-		return &sum, nil
-	}, stage4, stage5)
+			// Stage 5: Filter sums > 100
+			Filter("test-complex-filter2", pipe, func(_ context.Context, x int) (bool, error) {
+				return x > 100, nil
+			}, stage5, stage6)
 
-	// Stage 5: Filter sums > 100
-	Filter("test-complex-filter2", p, func(_ context.Context, x int) (bool, error) {
-		return x > 100, nil
-	}, stage5, stage6)
+			// Stage 6: Limit to 5 results
+			Limit("test-complex-limit", pipe, 5, stage6, out.At(0))
+		},
+	}
 
-	// Stage 6: Limit to 5 results
-	Limit("test-complex-limit", p, 5, stage6, stage7)
+	p, _ := NewPipeline(context.Background(), cfg)
+
+	for i := 1; i <= 50; i++ {
+		p.Inputs().At(0) <- i
+	}
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range stage7 {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -933,51 +915,55 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 }
 
 func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  15,
+		OutputBufferSize: 15,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			// Pipeline: FanOutRoundRobin -> ParallelTransform (on each branch) -> FanIn
+			out1 := make(chan int, 5)
+			out2 := make(chan int, 5)
+			out3 := make(chan int, 5)
+			processed1 := make(chan int, 5)
+			processed2 := make(chan int, 5)
+			processed3 := make(chan int, 5)
 
-	// Pipeline: FanOutRoundRobin -> ParallelTransform (on each branch) -> FanIn
-	in := make(chan int, 15)
-	out1 := make(chan int, 5)
-	out2 := make(chan int, 5)
-	out3 := make(chan int, 5)
-	processed1 := make(chan int, 5)
-	processed2 := make(chan int, 5)
-	processed3 := make(chan int, 5)
-	merged := make(chan int, 15)
+			FanOutRoundRobin("test-round-robin-fan-out", pipe, in.At(0), out1, out2, out3)
 
-	go func() {
-		for i := 1; i <= 15; i++ {
-			in <- i
-		}
-		close(in)
-	}()
+			ParallelTransform("test-round-robin-transform1", pipe, 2, func(_ context.Context, x int) (*int, error) {
+				time.Sleep(5 * time.Millisecond)
+				result := x * 100
+				return &result, nil
+			}, out1, processed1)
 
-	FanOutRoundRobin("test-round-robin-fan-out", p, in, out1, out2, out3)
+			ParallelTransform("test-round-robin-transform2", pipe, 2, func(_ context.Context, x int) (*int, error) {
+				time.Sleep(5 * time.Millisecond)
+				result := x * 200
+				return &result, nil
+			}, out2, processed2)
 
-	ParallelTransform("test-round-robin-transform1", p, 2, func(_ context.Context, x int) (*int, error) {
-		time.Sleep(5 * time.Millisecond)
-		result := x * 100
-		return &result, nil
-	}, out1, processed1)
+			ParallelTransform("test-round-robin-transform3", pipe, 2, func(_ context.Context, x int) (*int, error) {
+				time.Sleep(5 * time.Millisecond)
+				result := x * 300
+				return &result, nil
+			}, out3, processed3)
 
-	ParallelTransform("test-round-robin-transform2", p, 2, func(_ context.Context, x int) (*int, error) {
-		time.Sleep(5 * time.Millisecond)
-		result := x * 200
-		return &result, nil
-	}, out2, processed2)
+			FanIn("test-round-robin-fan-in", pipe, out.At(0), processed1, processed2, processed3)
+		},
+	}
 
-	ParallelTransform("test-round-robin-transform3", p, 2, func(_ context.Context, x int) (*int, error) {
-		time.Sleep(5 * time.Millisecond)
-		result := x * 300
-		return &result, nil
-	}, out3, processed3)
+	p, _ := NewPipeline(context.Background(), cfg)
 
-	FanIn("test-round-robin-fan-in", p, merged, processed1, processed2, processed3)
+	for i := 1; i <= 15; i++ {
+		p.Inputs().At(0) <- i
+	}
+	p.CloseAllInputs()
+	p.Start()
 
 	require.NoError(t, p.Wait(), "unexpected error from pipeline wait")
 
 	var results []int
-	for v := range merged {
+	for v := range p.Outputs().At(0) {
 		results = append(results, v)
 	}
 
@@ -990,47 +976,69 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 		1600: 1, 2200: 1, 2800: 1, // from out2
 		900: 1, 1800: 1, 2700: 1, 3600: 1, 4500: 1, // from out3
 	}
+
 	actualCounts := make(map[int]int)
 	for _, v := range results {
 		actualCounts[v]++
 	}
+
 	for val, expectedCount := range expectedCounts {
 		assert.Equalf(t, expectedCount, actualCounts[val], "value %d: unexpected count", val)
 	}
 }
 
 func TestPipeline_WithError(t *testing.T) {
-	p, _ := WithPipeline(context.Background(), "test")
 	expectedError := errors.New("test error")
 
-	in := make(chan int, 10)
-	out := make(chan int, 10)
+	cfg := PipelineConfig[int, int]{
+		Name:             "test",
+		InputBufferSize:  10,
+		OutputBufferSize: 10,
+		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+			Transform("test-with-error-transform", pipe, func(_ context.Context, x int) (*int, error) {
+				time.Sleep(10 * time.Millisecond)
+
+				if x == 5 {
+					return nil, expectedError
+				}
+
+				result := x * 2
+				return &result, nil
+			}, in.At(0), out.At(0))
+		},
+	}
+
+	p, _ := NewPipeline(context.Background(), cfg)
 
 	go func() {
 		for i := 1; i <= 100; i++ {
-			in <- i
+			// Sending might block/fail if pipeline is cancelled, so we ignore errors here
+			// or use select with default/ctx check if we had access to ctx inside loop easily.
+			// But for test, it's fine if it blocks or panics (it won't panic on send to closed,
+			// but we need to be careful).
+			// p.Inputs().At(0) <- i
+			// Actually, if we send to channel and pipeline cancels, channel isn't closed immediately by pipeline cancellation,
+			// but context is cancelled.
+			// However, p.CloseAllInputs() closes inputs.
+			// Let's rely on standard send.
+			select {
+			case p.Inputs().At(0) <- i:
+			case <-time.After(1 * time.Second): // timeout if blocked too long
+				return
+			}
 		}
-		close(in)
+		p.CloseAllInputs()
 	}()
 
-	Transform("test-with-error-transform", p, func(_ context.Context, x int) (*int, error) {
-		time.Sleep(10 * time.Millisecond)
-
-		if x == 5 {
-			return nil, expectedError
-		}
-
-		result := x * 2
-		return &result, nil
-	}, in, out)
+	p.Start()
 
 	err := p.Wait()
-	require.ErrorIs(t, expectedError, err)
+	require.ErrorIs(t, err, expectedError)
 
 	var results []int
 	for {
 		select {
-		case v, ok := <-out:
+		case v, ok := <-p.Outputs().At(0):
 			if !ok {
 				goto done
 			}

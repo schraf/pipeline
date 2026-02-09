@@ -79,27 +79,55 @@ func main() {
 
 ### Chaining Pipelines
 
-You can connect multiple pipelines using the `Chain` function. This connects
-the outputs of the previous pipeline to the inputs of the new pipeline
-automatically.
+You can connect a pipeline to one or more downstream pipelines using the `Chain`
+function. This connects the outputs of the previous pipeline to the inputs of
+the new pipelines automatically. If multiple configurations are provided, the
+data is fanned out to all downstream pipelines.
 
 ```go
 // Create first pipeline (e.g., generates or transforms data)
 p1, _ := pipeline.NewPipeline(ctx, cfg1)
 
-// Chain the second pipeline to the first
-// cfg2's Executor receives p1's outputs as its inputs
-p2, _, err := pipeline.Chain(ctx, p1, cfg2)
+// Chain two pipelines to the first one.
+// The output of p1 will be broadcast to both p2 and p3.
+// Note: Chain uses p1's context for the new pipelines.
+downstreamPipelines, err := pipeline.Chain(p1, cfg2, cfg3)
 if err != nil {
     panic(err)
 }
 
-// Start both pipelines
+// Start all pipelines
 p1.Start()
-p2.Start()
+for _, p := range downstreamPipelines {
+    p.Start()
+}
 
-// Feed p1 and consume from p2
+// Feed p1 and consume from p2/p3 (via downstreamPipelines)
 // ...
+```
+
+### Pipeline Groups
+
+The `PipelineGroup` struct allows you to manage a collection of pipelines with
+the same input and output types. It provides methods to add, start, and wait for
+multiple pipelines as a single unit.
+
+```go
+// Create a group for the downstream pipelines
+group := pipeline.NewPipelineGroup[int, int]()
+
+// Add pipelines to the group
+group.Add(downstreamPipelines...)
+
+// Start all pipelines in the group
+if err := group.Start(); err != nil {
+    panic(err)
+}
+
+// Wait for all pipelines in the group to complete
+if err := group.Wait(ctx); err != nil {
+    panic(err)
+}
 ```
 
 ## Pipeline Stages

@@ -111,15 +111,17 @@ func (p *Pipeline[In, Out]) Start() {
 	}()
 }
 
+// CloseAllInputs will close all of the input channels
+func (p *Pipeline[In, Out]) CloseAllInputs() {
+	for _, input := range p.inputs {
+		close(input)
+	}
+}
+
 // Wait blocks until all registered stages complete and returns the first error
 // encountered by any stage, or nil if all stages completed successfully.
 func (p *Pipeline[In, Out]) Wait() error {
 	defer p.task.End()
-
-	for _, input := range p.inputs {
-		close(input)
-	}
-
 	p.group.Wait()
 	return p.err
 }

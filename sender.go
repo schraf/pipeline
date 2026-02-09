@@ -1,6 +1,10 @@
 package pipeline
 
-import "iter"
+import (
+	"context"
+	"fmt"
+	"iter"
+)
 
 type MultiChannelSender[T any] []chan T
 
@@ -24,4 +28,20 @@ func (m MultiChannelSender[T]) Iter() iter.Seq[chan<- T] {
 			}
 		}
 	}
+}
+
+func (m MultiChannelSender[T]) Send(ctx context.Context, index int, values ...T) error {
+	if index < 0 || index >= len(m) {
+		return fmt.Errorf("runtime error: channel index %d out of range", index)
+	}
+
+	for _, value := range values {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case m[index] <- value:
+		}
+	}
+
+	return nil
 }

@@ -4,9 +4,13 @@ A Go package for building concurrent data processing pipelines using channels.
 
 ## Overview
 
-`pipeline` provides a set of composable stages for processing data streams concurrently. It handles context cancellation, error propagation, and goroutine lifecycle management automatically.
+`pipeline` provides a set of composable stages for processing data streams
+concurrently. It handles context cancellation, error propagation, and goroutine
+lifecycle management automatically.
 
-All pipeline stages require a name parameter as their first argument. These names are used to create trace regions for performance analysis using Go's `runtime/trace` package. When creating a pipeline with `WithPipeline`, you also provide a name for the overall pipeline task.
+All pipeline stages require a name parameter as their first argument. These
+names are used to create trace regions for performance analysis using Go's
+`runtime/trace` package.
 
 ## Installation
 
@@ -18,99 +22,98 @@ go get github.com/schraf/pipeline
 
 ### Basic Example
 
+To create a pipeline, you define a `PipelineConfig` which specifies the
+pipeline's name, buffer sizes, and an `Executor` function. The `Executor` is
+where you connect your pipeline stages.
+
 ```go
 package main
 
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/schraf/pipeline"
 )
 
 func main() {
-	p, _ := pipeline.WithPipeline(context.Background(), "example")
+	// Define the pipeline configuration
+	cfg := pipeline.PipelineConfig[int, int]{
+		Name:            "example",
+		InputChannels:   1,
+		OutputChannels:  1,
+		Executor: func(pipe *pipeline.Pipe, in pipeline.MultiChannelReceiver[int], out pipeline.MultiChannelSender[int]) {
+			// Connect input to output through a Transform stage
+			pipeline.Transform("multiply", pipe, func(ctx context.Context, x int) (*int, error) {
+				result := x * 2
+				return &result, nil
+			}, in.At(0), out.At(0))
+		},
+	}
 
-	// Define some data to process
-	data := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	// Create the pipeline
+	p, _ := pipeline.NewPipeline(context.Background(), cfg)
 
-	// Create channels
-	in := make(chan int, len(data))
-	out := make(chan int, len(data))
+	// Start processing
+	p.Start()
 
-	// Source: feed data into the pipeline from a slice
-	pipeline.SourceSlice("source", p, slices.Values(data), in)
+	// Feed data into the pipeline
+	go func() {
+		defer p.CloseAllInputs()
+		for i := 1; i <= 10; i++ {
+			p.Inputs().At(0) <- i
+		}
+	}()
 
-	// Transform: multiply by 2
-	pipeline.Transform("multiply", p, func(ctx context.Context, x int) (*int, error) {
-		result := x * 2
-		return &result, nil
-	}, in, out)
-
-
-	// Read results
-	for v, err := range pipeline.Sink("sink", p, out) {
-        if err != nil {
-            panic(err)
-        }
-
+	// Consume results
+	for v := range p.Outputs().At(0) {
 		fmt.Println(v)
+	}
+
+	// Wait for completion and check for errors
+	if err := p.Wait(); err != nil {
+		panic(err)
 	}
 }
 ```
 
+### Chaining Pipelines
+
+You can connect multiple pipelines using the `Chain` function. This connects
+the outputs of the previous pipeline to the inputs of the new pipeline
+automatically.
+
+```go
+// Create first pipeline (e.g., generates or transforms data)
+p1, _ := pipeline.NewPipeline(ctx, cfg1)
+
+// Chain the second pipeline to the first
+// cfg2's Executor receives p1's outputs as its inputs
+p2, _, err := pipeline.Chain(ctx, p1, cfg2)
+if err != nil {
+    panic(err)
+}
+
+// Start both pipelines
+p1.Start()
+p2.Start()
+
+// Feed p1 and consume from p2
+// ...
+```
+
 ## Pipeline Stages
 
-### Source
-
-Starts a pipeline from a fallible iterator (`iter.Seq2[T, error]`). If the iterator returns an error, the pipeline is cancelled.
-
-```go
-// Example: create a custom iterator that reads from a file or database
-// and can return an error.
-var myIterator iter.Seq2[string, error] 
-
-out := make(chan string, 100)
-pipeline.Source("my-source", p, myIterator, out)
-```
-
-### SourceSlice
-
-Starts a pipeline from a simple, error-free iterator (`iter.Seq[T]`), which is useful for in-memory slices.
-
-```go
-data := []int{1, 2, 3, 4, 5}
-out := make(chan int, 5)
-
-// The iterator can be created from a slice using slices.Values
-pipeline.SourceSlice("source", p, slices.Values(data), out)
-```
-
-### Sink
-
-The "opposite" of a source, `Sink` takes an input channel and returns an `iter.Seq2[T, error]` iterator. This allows consuming values from a pipeline using a standard `for...range` loop. If the pipeline is cancelled, the iterator will yield an error.
-
-```go
-// Given 'out' is a channel from a pipeline stage...
-it := pipeline.Sink("sink", p, out)
-
-// You can now iterate over the results.
-for v, err := range it {
-    if err != nil {
-        // This can happen if the pipeline is cancelled.
-        log.Fatalf("iterator error: %v", err)
-    }
-    fmt.Println(v)
-}
-```
+Stages are designed to be used inside the `Executor` function of your
+`PipelineConfig`. The `pipe` argument provided to the executor is passed to
+each stage.
 
 ### Transform
 
 Applies a transformation function to each value:
 
 ```go
-pipeline.Transform("transform", p, func(ctx context.Context, x int) (*int, error) {
+pipeline.Transform("transform", pipe, func(ctx context.Context, x int) (*int, error) {
     result := x * 2
     return &result, nil
 }, in, out)
@@ -121,7 +124,7 @@ pipeline.Transform("transform", p, func(ctx context.Context, x int) (*int, error
 Filters values based on a predicate:
 
 ```go
-pipeline.Filter("filter", p, func(ctx context.Context, x int) (bool, error) {
+pipeline.Filter("filter", pipe, func(ctx context.Context, x int) (bool, error) {
     return x%2 == 0, nil
 }, in, out)
 ```
@@ -131,7 +134,7 @@ pipeline.Filter("filter", p, func(ctx context.Context, x int) (bool, error) {
 Groups values into fixed-size batches:
 
 ```go
-pipeline.Batch("batch", p, func(ctx context.Context, batch []int) (*int, error) {
+pipeline.Batch("batch", pipe, func(ctx context.Context, batch []int) (*int, error) {
     sum := 0
     for _, v := range batch {
         sum += v
@@ -145,7 +148,7 @@ pipeline.Batch("batch", p, func(ctx context.Context, batch []int) (*int, error) 
 Applies transformation with concurrent workers:
 
 ```go
-pipeline.ParallelTransform("parallel-transform", p, 5, func(ctx context.Context, x int) (*int, error) {
+pipeline.ParallelTransform("parallel-transform", pipe, 5, func(ctx context.Context, x int) (*int, error) {
     result := x * 2
     return &result, nil
 }, in, out)
@@ -156,7 +159,7 @@ pipeline.ParallelTransform("parallel-transform", p, 5, func(ctx context.Context,
 Merges multiple input channels into one:
 
 ```go
-pipeline.FanIn("fan-in", p, out, in1, in2, in3)
+pipeline.FanIn("fan-in", pipe, out, in1, in2, in3)
 ```
 
 ### FanOut
@@ -164,7 +167,7 @@ pipeline.FanIn("fan-in", p, out, in1, in2, in3)
 Distributes values to multiple output channels (broadcast):
 
 ```go
-pipeline.FanOut("fan-out", p, in, out1, out2, out3)
+pipeline.FanOut("fan-out", pipe, in, out1, out2, out3)
 ```
 
 ### FanOutRoundRobin
@@ -172,7 +175,7 @@ pipeline.FanOut("fan-out", p, in, out1, out2, out3)
 Distributes values round-robin style:
 
 ```go
-pipeline.FanOutRoundRobin("fan-out-round-robin", p, in, out1, out2, out3)
+pipeline.FanOutRoundRobin("fan-out-round-robin", pipe, in, out1, out2, out3)
 ```
 
 ### Limit
@@ -180,7 +183,7 @@ pipeline.FanOutRoundRobin("fan-out-round-robin", p, in, out1, out2, out3)
 Limits the number of values passed through:
 
 ```go
-pipeline.Limit("limit", p, 10, in, out)
+pipeline.Limit("limit", pipe, 10, in, out)
 ```
 
 ### Split
@@ -188,7 +191,7 @@ pipeline.Limit("limit", p, 10, in, out)
 Routes values to different channels based on a selector:
 
 ```go
-pipeline.Split("split", p, func(ctx context.Context, x int) int {
+pipeline.Split("split", pipe, func(ctx context.Context, x int) int {
     return (x - 1) % 3
 }, in, out1, out2, out3)
 ```
@@ -198,33 +201,39 @@ pipeline.Split("split", p, func(ctx context.Context, x int) int {
 Collects all values into a single slice:
 
 ```go
-pipeline.Aggregate("aggregate", p, in, out)
+pipeline.Aggregate("aggregate", pipe, in, out)
 ```
 
 ### Reduce
 
-Processes values incrementally using a reducer function, combining them with an accumulator. This allows aggregating results as they come in without keeping all values in memory:
+Processes values incrementally using a reducer function, combining them with an
+accumulator. This allows aggregating results as they come in without keeping
+all values in memory:
 
 ```go
-pipeline.Reduce("reduce", p, 0, func(ctx context.Context, acc int, x int) (int, error) {
+pipeline.Reduce("reduce", pipe, 0, func(ctx context.Context, acc int, x int) (int, error) {
     return acc + x, nil
 }, in, out)
 ```
 
 ### Flatten
 
-Takes an input channel of slices and emits each element of each slice as an individual item on the output channel:
+Takes an input channel of slices and emits each element of each slice as an
+individual item on the output channel:
 
 ```go
-pipeline.Flatten("flatten", p, in, out)
+pipeline.Flatten("flatten", pipe, in, out)
 ```
 
 ### Expand
 
-Takes single input items from a channel and for each input, outputs multiple items of another type. The expander function returns an iterator (`iter.Seq2[Out, error]`) of output items for each input, allowing for lazy evaluation and avoiding loading all expanded items into memory at once:
+Takes single input items from a channel and for each input, outputs multiple
+items of another type. The expander function returns an iterator
+(`iter.Seq2[Out, error]`) of output items for each input, allowing for lazy
+evaluation and avoiding loading all expanded items into memory at once:
 
 ```go
-pipeline.Expand("expand", p, func(ctx context.Context, x int) iter.Seq2[string, error] {
+pipeline.Expand("expand", pipe, func(ctx context.Context, x int) iter.Seq2[string, error] {
     return func(yield func(string, error) bool) {
         yield(fmt.Sprintf("%d", x), nil)
         yield(fmt.Sprintf("%d", x*2), nil)
@@ -234,7 +243,8 @@ pipeline.Expand("expand", p, func(ctx context.Context, x int) iter.Seq2[string, 
 
 ## Error Handling
 
-The pipeline automatically cancels all stages when an error occurs. The first error encountered is returned by `Wait()`:
+The pipeline automatically cancels all stages when an error occurs. The first
+error encountered is returned by `Wait()`:
 
 ```go
 if err := p.Wait(); err != nil {

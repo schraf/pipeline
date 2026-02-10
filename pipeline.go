@@ -17,6 +17,11 @@ type Pipe struct {
 	err   func(error)
 }
 
+// Context returns the context of the pipeline
+func (p Pipe) Context() context.Context {
+	return p.ctx
+}
+
 // PipeExecutor defines the body of the pipeline. The function should connect
 // the input channel to the output channel using stages on the provided pipe.
 type PipelineExecutor[In any, Out any] func(*Pipe, MultiChannelReceiver[In], MultiChannelSender[Out])

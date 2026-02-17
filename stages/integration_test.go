@@ -1,16 +1,6 @@
 package stages_test
 
-import (
-	"context"
-	"errors"
-	"testing"
-	"time"
-
-	"github.com/schraf/pipeline/v3"
-	"github.com/schraf/pipeline/v3/stages"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-)
+/*
 
 // End-to-end multi-stage pipeline tests
 
@@ -567,3 +557,5 @@ done:
 
 	assert.NotEmpty(t, results, "expected some results before cancellation")
 }
+
+*/

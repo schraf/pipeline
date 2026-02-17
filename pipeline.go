@@ -19,16 +19,6 @@ const (
 	stateDone
 )
 
-// PipeConfig defines the make up of a pipeline and is required for
-// construction of it
-type PipelineConfig[In any, Out any] struct {
-	Name             string
-	InputChannels    int
-	InputBufferSize  int
-	OutputChannels   int
-	OutputBufferSize int
-}
-
 // Pipeline coordinates concurrent processing stages, managing their lifecycle
 // and propagating errors and cancellation signals across all stages.
 type Pipeline[In any, Out any] struct {
@@ -46,7 +36,7 @@ type Pipeline[In any, Out any] struct {
 // NewPipeline creates a new Pipeline and a derived context for coordinating
 // pipeline stages. The returned context is cancelled when any stage encounters
 // an error. Use the returned Pipeline to register stages and wait for completion.
-func NewPipeline[In any, Out any](ctx context.Context, cfg PipelineConfig[In, Out]) (*Pipeline[In, Out], context.Context) {
+func NewPipeline[In any, Out any](ctx context.Context, cfg Config[In, Out]) (*Pipeline[In, Out], context.Context) {
 	ctx, task := trace.NewTask(ctx, cfg.Name)
 	ctx, cancel := context.WithCancelCause(ctx)
 
@@ -80,14 +70,20 @@ func NewPipeline[In any, Out any](ctx context.Context, cfg PipelineConfig[In, Ou
 
 	pipeline.state.Store(stateCreated)
 
+	cfg.Composer(Composer[In, Out]{
+		ctx:     pipeline.context(),
+		inputs:  pipeline.inputs,
+		outputs: pipeline.outputs,
+	})
+
 	return pipeline, ctx
 }
 
-func (p *Pipeline[In, Out]) Context() Context {
+func (p *Pipeline[In, Out]) context() Context {
 	return Context{
-		parent: p.ctx,
-		group:  &p.group,
-		err:    p.setError,
+		Context: p.ctx,
+		group:   &p.group,
+		err:     p.setError,
 	}
 }
 

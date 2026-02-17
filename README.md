@@ -20,7 +20,7 @@ go get github.com/schraf/pipeline/v3
 
 ### Basic Example
 
-To create a pipeline, you define a `PipelineConfig` and use `NewPipeline`. You then connect stages by calling their `Create` methods.
+To create a pipeline, you define a `Config` and use `NewPipeline`. You then connect stages by calling their `Create` methods.
 
 ```go
 package main
@@ -37,7 +37,7 @@ func main() {
 	ctx := context.Background()
 
 	// 1. Define the pipeline configuration
-	cfg := pipeline.PipelineConfig[int, int]{
+	cfg := pipeline.Config[int, int]{
 		Name:             "example",
 		InputBufferSize:  10,
 		OutputBufferSize: 10,
@@ -85,13 +85,14 @@ func main() {
 
 ## Pipeline Configuration
 
-The `PipelineConfig` struct specifies the pipeline's basic parameters:
+The `Config` struct specifies the pipeline's basic parameters:
 
 - `Name`: Used for tracing and identification.
 - `InputChannels`: Number of input channels to create (defaults to 1).
 - `InputBufferSize`: Buffer size for each input channel.
 - `OutputChannels`: Number of output channels to create (defaults to 1).
 - `OutputBufferSize`: Buffer size for each output channel.
+- `Composer`: Function used to connect the pipeline inputs to outputs.
 
 ## Pipeline Stages
 

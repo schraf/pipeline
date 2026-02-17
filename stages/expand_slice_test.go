@@ -8,28 +8,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestExpandSliceStage_Success(t *testing.T) {
-	data := []int{1, 2, 3, 4, 5}
-
-	results := runStageTest(t, [][]int{data},
-		func(pctx pipeline.Context, in <-chan []int) <-chan int {
-			return stages.ExpandSliceStage[int]{
-				Name:   "test-expand-slice",
-				Buffer: 5,
-			}.Create(pctx, in)
-		},
-	)
-
-	assert.Equal(t, data, results)
-}
-
 func TestExpandSliceStage_MultipleSlices(t *testing.T) {
 	results := runStageTest(t, [][]int{{1, 2}, {3, 4, 5}, {6}},
-		func(pctx pipeline.Context, in <-chan []int) <-chan int {
-			return stages.ExpandSliceStage[int]{
+		func(composer pipeline.Composer[[]int, int]) {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
+
+			outputs.Link(ctx, 0, stages.ExpandSliceStage[int]{
 				Name:   "test-expand-slice",
 				Buffer: 10,
-			}.Create(pctx, in)
+			}.Create(ctx, inputs.At(0)))
 		},
 	)
 

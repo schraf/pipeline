@@ -4,76 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"iter"
 	"runtime/trace"
 
 	"golang.org/x/sync/errgroup"
 )
-
-// Transform reads values from the input channel, applies the transformer
-// function, and forwards successful results to the output channel until the
-// context is done or the input channel is closed. The transformer must return
-// a non-nil pointer when err is nil, otherwise a panic will occur.
-func Transform[In any, Out any](name string, pipe *Pipe, transformer func(context.Context, In) (*Out, error), in <-chan In, out chan<- Out) {
-	pipe.group.Add(1)
-
-	go func() {
-		defer close(out)
-		defer pipe.group.Done()
-		defer trace.StartRegion(pipe.ctx, name).End()
-
-		for input := range in {
-			output, err := transformer(pipe.ctx, input)
-			if err != nil {
-				pipe.err(err)
-				return
-			}
-			if output == nil {
-				pipe.err(errors.New("transformer returned nil output without error"))
-				return
-			}
-
-			select {
-			case <-pipe.ctx.Done():
-				return
-			case out <- *output:
-			}
-		}
-	}()
-}
-
-// Expand reads values from the input channel, applies the expander function to
-// each value, and forwards all items from the returned iterator to the output
-// channel. For each input item, the expander returns an iterator of output items,
-// which are all sent to the output channel. Processing continues until the
-// context is done or the input channel is closed. This allows for lazy evaluation
-// and avoids loading all expanded items into memory at once.
-func Expand[In any, Out any](name string, pipe *Pipe, expander func(context.Context, In) iter.Seq2[Out, error], in <-chan In, out chan<- Out) {
-	pipe.group.Add(1)
-
-	go func() {
-		defer close(out)
-		defer pipe.group.Done()
-		defer trace.StartRegion(pipe.ctx, name).End()
-
-		for input := range in {
-			seq := expander(pipe.ctx, input)
-
-			for output, err := range seq {
-				if err != nil {
-					pipe.err(err)
-					return
-				}
-
-				select {
-				case <-pipe.ctx.Done():
-					return
-				case out <- output:
-				}
-			}
-		}
-	}()
-}
 
 // ExpandSlice reads slices from the input channel and forwards all items from the
 // returned iterator to the output channel.

@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"iter"
-	"runtime/trace"
 
 	"github.com/schraf/pipeline/v3"
 )
@@ -20,34 +19,35 @@ import (
 type Expander[In any, Out any] func(context.Context, In) iter.Seq2[Out, error]
 
 type ExpandStage[In any, Out any] struct {
-	name     string
-	expander Expander[In, Out]
+	Name     string
+	Buffer   int
+	Expander Expander[In, Out]
 }
 
-func (s ExpandStage[In, Out]) Create(ctx pipeline.Context, in <-chan In, buffer int) chan<- Out {
-	ctx.group.Add(1)
-	out := make(chan out, buffer)
+func (s ExpandStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan Out {
+	out := make(chan Out, s.Buffer)
 
-	go func() {
+	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
-		defer ctx.group.Done()
-		defer trace.StartRegion(ctx.parent, s.name).End()
 
 		for input := range in {
-			seq := s.expander(ctx.parent, input)
+			seq := s.Expander(ctx, input)
 
 			for output, err := range seq {
 				if err != nil {
-					ctx.err(err)
-					return
+					return err
 				}
 
 				select {
-				case <-ctx.parent.Done():
-					return
+				case <-ctx.Done():
+					return ctx.Err()
 				case out <- output:
 				}
 			}
 		}
-	}()
+
+		return nil
+	})
+
+	return out
 }

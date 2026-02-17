@@ -2,44 +2,44 @@ package stages
 
 import (
 	"context"
-	"errors"
 
 	"github.com/schraf/pipeline/v3"
 )
 
 // ╔═══════════════════════════════════════════════════════════════════════════╗
-// ║Transform reads values from the input channel, applies the transformer     ║
-// ║function, and forwards successful results to the output channel until the  ║
-// ║context is done or the input channel is closed.                            ║
+// ║Filter reads values from the input channel, applies the filter predicate,  ║
+// ║and forwards only values that satisfy the predicate to the output channel. ║
+// ║It respects context cancellation and stops processing on error.            ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
 
-type Transformer[In any, Out any] func(context.Context, In) (*Out, error)
+type Filter[T any] func(context.Context, T) (bool, error)
 
-type TransformStage[In any, Out any] struct {
-	Name        string
-	Buffer      int
-	Transformer Transformer[In, Out]
+type FilterStage[T any] struct {
+	Name   string
+	Buffer int
+	Filter Filter[T]
 }
 
-func (s TransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan Out {
-	out := make(chan Out, s.Buffer)
+func (s FilterStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan T {
+	out := make(chan T, s.Buffer)
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
 
 		for input := range in {
-			output, err := s.Transformer(ctx, input)
+			shouldForward, err := s.Filter(ctx, input)
 			if err != nil {
 				return err
 			}
-			if output == nil {
-				return errors.New("transformer returned nil output without error")
+
+			if !shouldForward {
+				continue
 			}
 
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case out <- *output:
+			case out <- input:
 			}
 		}
 

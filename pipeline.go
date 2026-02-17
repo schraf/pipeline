@@ -86,7 +86,7 @@ func NewPipeline[In any, Out any](ctx context.Context, cfg PipelineConfig[In, Ou
 func (p *Pipeline[In, Out]) Context() Context {
 	return Context{
 		parent: p.ctx,
-		group:  p.group,
+		group:  &p.group,
 		err:    p.setError,
 	}
 }
@@ -101,7 +101,7 @@ func (p *Pipeline[In, Out]) Outputs() MultiChannelReceiver[Out] {
 
 func (p *Pipeline[In, Out]) Start() error {
 	if !p.state.CompareAndSwap(stateCreated, stateStarted) {
-		return fmt.Errorf("unable to start pipeline, unexpected state: %s", p.state.String())
+		return fmt.Errorf("unable to start pipeline, unexpected state: %d", p.state.Load())
 	}
 
 	return nil
@@ -118,7 +118,7 @@ func (p *Pipeline[In, Out]) CloseAllInputs() {
 // encountered by any stage, or nil if all stages completed successfully.
 func (p *Pipeline[In, Out]) Wait() error {
 	if !p.state.CompareAndSwap(stateStarted, stateWaiting) {
-		return fmt.Errorf("unable to wait on pipeline, unexpected state: %s", p.state.String())
+		return fmt.Errorf("unable to wait on pipeline, unexpected state: %d", p.state.Load())
 	}
 
 	defer p.task.End()

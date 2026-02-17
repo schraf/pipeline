@@ -42,7 +42,8 @@ func main() {
 		Name:            "example",
 		InputChannels:   1,
 		OutputChannels:  1,
-		Executor: func(pipe *pipeline.Pipe, in pipeline.MultiChannelReceiver[int], out pipeline.MultiChannelSender[int]) {
+		Executor: func(params *pipeline.PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			// Connect input to output through a Transform stage
 			pipeline.Transform("multiply", pipe, func(ctx context.Context, x int) (*int, error) {
 				result := x * 2

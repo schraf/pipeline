@@ -16,7 +16,8 @@ func TestExpand_Success(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  1,
 		OutputBufferSize: 5,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[[]int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[[]int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			ExpandSlice("test-source", pipe, in.At(0), out.At(0))
 		},
 	}
@@ -43,7 +44,8 @@ func TestTransform(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  5,
 		OutputBufferSize: 5,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Transform("test-transform", pipe, func(ctx context.Context, x int) (*int, error) {
 				result := x * 2
 				return &result, nil
@@ -77,7 +79,8 @@ func TestFilter(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  10,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Filter("test-filter", pipe, func(ctx context.Context, x int) (bool, error) {
 				return x%2 == 0, nil
 			}, in.At(0), out.At(0))
@@ -110,7 +113,8 @@ func TestBatch(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  10,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Batch("test-batch", pipe, func(ctx context.Context, batch []int) (*int, error) {
 				sum := 0
 				for _, v := range batch {
@@ -150,7 +154,8 @@ func TestFanIn(t *testing.T) {
 		InputChannels:    3,
 		InputBufferSize:  3,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			FanIn("test-fan-in", pipe, out.At(0), in.At(0), in.At(1), in.At(2))
 		},
 	}
@@ -191,7 +196,8 @@ func TestFanOut(t *testing.T) {
 		InputBufferSize:  3,
 		OutputChannels:   3,
 		OutputBufferSize: 3,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			FanOut("test-fan-out", pipe, in.At(0), out.At(0), out.At(1), out.At(2))
 		},
 	}
@@ -244,7 +250,8 @@ func TestFanOutRoundRobin(t *testing.T) {
 		InputBufferSize:  6,
 		OutputChannels:   3,
 		OutputBufferSize: 3,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			FanOutRoundRobin("test-fan-out-round-robin", pipe, in.At(0), out.At(0), out.At(1), out.At(2))
 		},
 	}
@@ -302,7 +309,8 @@ func TestParallelTransform(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  10,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			ParallelTransform("test-parallel-transform", pipe, 3, func(_ context.Context, x int) (*int, error) {
 				time.Sleep(10 * time.Millisecond)
 				result := x * 2
@@ -347,7 +355,8 @@ func TestLimit(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  10,
 		OutputBufferSize: 5,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Limit("test-limit", pipe, 5, in.At(0), out.At(0))
 		},
 	}
@@ -378,7 +387,8 @@ func TestSplit(t *testing.T) {
 		InputBufferSize:  6,
 		OutputChannels:   3,
 		OutputBufferSize: 3,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Split("test-split", pipe, func(_ context.Context, x int) int {
 				return (x - 1) % 3
 			}, in.At(0), out.At(0), out.At(1), out.At(2))
@@ -438,7 +448,8 @@ func TestAggregate(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  5,
 		OutputBufferSize: 1,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[[]int]) {
+		Executor: func(params *PipelineParameters[int, []int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Aggregate("test-aggregate", pipe, in.At(0), out.At(0))
 		},
 	}
@@ -464,7 +475,8 @@ func TestReduce_Sum(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  5,
 		OutputBufferSize: 1,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Reduce("test-reduce-sum", pipe, 0, func(_ context.Context, acc int, val int) (int, error) {
 				return acc + val, nil
 			}, in.At(0), out.At(0))
@@ -492,7 +504,8 @@ func TestReduce_StringConcatenation(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  4,
 		OutputBufferSize: 1,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[string], out MultiChannelSender[string]) {
+		Executor: func(params *PipelineParameters[string, string]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Reduce("test-reduce-string", pipe, "", func(_ context.Context, acc string, val string) (string, error) {
 				return acc + val, nil
 			}, in.At(0), out.At(0))
@@ -519,7 +532,8 @@ func TestReduce_MaxValue(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  6,
 		OutputBufferSize: 1,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Reduce("test-reduce-max", pipe, 0, func(_ context.Context, acc int, val int) (int, error) {
 				if val > acc {
 					return val, nil
@@ -549,7 +563,8 @@ func TestFlatten(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  3,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[[]int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[[]int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Flatten("test-flatten", pipe, in.At(0), out.At(0))
 		},
 	}
@@ -578,7 +593,8 @@ func TestExpand(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  3,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Expand("test-expand", pipe, func(_ context.Context, x int) iter.Seq2[int, error] {
 				// For each input, output x, x*2, x*3
 				return func(yield func(int, error) bool) {
@@ -616,7 +632,8 @@ func TestPipeline_TransformFilterLimit(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  20,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			// Pipeline: Transform -> Filter -> Limit
 			transformed := make(chan int, 20)
 			filtered := make(chan int, 20)
@@ -663,7 +680,8 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  30,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[[]int]) {
+		Executor: func(params *PipelineParameters[int, []int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			// Pipeline: ParallelTransform -> Batch
 			transformed := make(chan int, 30)
 
@@ -716,7 +734,8 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 		InputBufferSize:  5,
 		OutputChannels:   2,
 		OutputBufferSize: 15,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			merged := make(chan int, 15)
 			transformed := make(chan int, 15)
 
@@ -776,7 +795,8 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  12,
 		OutputBufferSize: 18,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			out1 := make(chan int, 6)
 			out2 := make(chan int, 6)
 			out3 := make(chan int, 6)
@@ -848,7 +868,8 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  50,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			// Complex pipeline: Filter -> Transform -> Batch -> Transform -> Filter -> Limit
 			stage2 := make(chan int, 50)
 			stage3 := make(chan int, 50)
@@ -919,7 +940,8 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  15,
 		OutputBufferSize: 15,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			// Pipeline: FanOutRoundRobin -> ParallelTransform (on each branch) -> FanIn
 			out1 := make(chan int, 5)
 			out2 := make(chan int, 5)
@@ -994,7 +1016,8 @@ func TestPipeline_WithError(t *testing.T) {
 		Name:             "test",
 		InputBufferSize:  10,
 		OutputBufferSize: 10,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Transform("test-with-error-transform", pipe, func(_ context.Context, x int) (*int, error) {
 				time.Sleep(10 * time.Millisecond)
 

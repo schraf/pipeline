@@ -13,7 +13,8 @@ func TestChain_Simple(t *testing.T) {
 	cfg1 := PipelineConfig[int, int]{
 		Name:            "p1",
 		InputBufferSize: 5,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Transform("p1-transform", pipe, func(_ context.Context, x int) (*int, error) {
 				res := x * 2
 				return &res, nil
@@ -25,7 +26,8 @@ func TestChain_Simple(t *testing.T) {
 	cfg2 := PipelineConfig[int, int]{
 		Name:            "p2",
 		InputBufferSize: 5,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Transform("p2-transform", pipe, func(_ context.Context, x int) (*int, error) {
 				res := x + 1
 				return &res, nil
@@ -74,7 +76,8 @@ func TestChain_Cancellation(t *testing.T) {
 	// P1: Infinite generator
 	cfg1 := PipelineConfig[int, int]{
 		Name: "p1",
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, _, out := params.Pipe, params.In, params.Out
 			go func() {
 				defer close(out.At(0))
 				i := 0
@@ -93,7 +96,8 @@ func TestChain_Cancellation(t *testing.T) {
 	// P2: Consumes a few then cancels
 	cfg2 := PipelineConfig[int, int]{
 		Name: "p2",
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Limit("p2-limit", pipe, 5, in.At(0), out.At(0))
 		},
 	}
@@ -131,7 +135,8 @@ func TestChain_DirectConnection(t *testing.T) {
 	cfg1 := PipelineConfig[int, int]{
 		Name:           "p1",
 		OutputChannels: 2,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			FanOutRoundRobin("p1-fanout", pipe, in.At(0), out.At(0), out.At(1))
 		},
 	}
@@ -140,7 +145,8 @@ func TestChain_DirectConnection(t *testing.T) {
 	cfg2 := PipelineConfig[int, int]{
 		Name:          "p2",
 		InputChannels: 2,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			// Process inputs separately to verify mapping
 			// Input 0 -> Output 0
 			// Input 1 -> Output 0
@@ -182,7 +188,7 @@ func TestChain_Mismatch_Panic(t *testing.T) {
 	// P1: 1 Output
 	cfg1 := PipelineConfig[int, int]{
 		Name: "p1",
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(_ *PipelineParameters[int, int]) {
 		},
 	}
 
@@ -190,7 +196,7 @@ func TestChain_Mismatch_Panic(t *testing.T) {
 	cfg2 := PipelineConfig[int, int]{
 		Name:          "p2",
 		InputChannels: 2,
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(_ *PipelineParameters[int, int]) {
 		},
 	}
 
@@ -205,7 +211,8 @@ func TestChain_MultipleChildren(t *testing.T) {
 	// P1: Emits data
 	cfg1 := PipelineConfig[int, int]{
 		Name: "p1",
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Transform("p1-transform", pipe, func(_ context.Context, v int) (*int, error) {
 				return &v, nil
 			}, in.At(0), out.At(0))
@@ -215,7 +222,8 @@ func TestChain_MultipleChildren(t *testing.T) {
 	// P2: Multiplies by 10
 	cfg2 := PipelineConfig[int, int]{
 		Name: "p2",
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Transform("p2-transform", pipe, func(_ context.Context, v int) (*int, error) {
 				res := v * 10
 				return &res, nil
@@ -226,7 +234,8 @@ func TestChain_MultipleChildren(t *testing.T) {
 	// P3: Adds 5
 	cfg3 := PipelineConfig[int, int]{
 		Name: "p3",
-		Executor: func(pipe *Pipe, in MultiChannelReceiver[int], out MultiChannelSender[int]) {
+		Executor: func(params *PipelineParameters[int, int]) {
+			pipe, in, out := params.Pipe, params.In, params.Out
 			Transform("p3-transform", pipe, func(_ context.Context, v int) (*int, error) {
 				res := v + 5
 				return &res, nil

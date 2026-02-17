@@ -22,9 +22,17 @@ func (p Pipe) Context() context.Context {
 	return p.ctx
 }
 
-// PipeExecutor defines the body of the pipeline. The function should connect
-// the input channel to the output channel using stages on the provided pipe.
-type PipelineExecutor[In any, Out any] func(*Pipe, MultiChannelReceiver[In], MultiChannelSender[Out])
+// PipelineParameters defines types needed for the body of the pipeline
+// execution.
+type PipelineParameters[In any, Out any] struct {
+	Pipe *Pipe
+	In   MultiChannelReceiver[In]
+	Out  MultiChannelSender[Out]
+}
+
+// PipelineExecutor defines the execution body of the pipeline. It will
+// need to connect the input channels to the output channels.
+type PipelineExecutor[In any, Out any] func(*PipelineParameters[In, Out])
 
 // PipeConfig defines the make up of a pipeline and is required for
 // construction of it
@@ -137,7 +145,13 @@ func (p *Pipeline[In, Out]) Start() error {
 		inputs := MultiChannelReceiver[In](p.inputs)
 		outputs := MultiChannelSender[Out](p.outputs)
 
-		p.executor(&pipe, inputs, outputs)
+		params := PipelineParameters[In, Out]{
+			Pipe: &pipe,
+			In:   inputs,
+			Out:  outputs,
+		}
+
+		p.executor(&params)
 	}()
 
 	return nil

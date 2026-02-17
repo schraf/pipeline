@@ -4,27 +4,23 @@ A Go package for building concurrent data processing pipelines using channels.
 
 ## Overview
 
-`pipeline` provides a set of composable stages for processing data streams
-concurrently. It handles context cancellation, error propagation, and goroutine
-lifecycle management automatically.
+`pipeline` provides a set of composable stages for processing data streams concurrently. It handles context cancellation, error propagation, and goroutine lifecycle management automatically.
 
-All pipeline stages require a name parameter as their first argument. These
-names are used to create trace regions for performance analysis using Go's
-`runtime/trace` package.
+Stages are defined as structs in the `stages` package. Each stage has a `Create` method that integrates it into a pipeline by connecting input and output channels.
+
+The package uses Go's `runtime/trace` to create trace regions for each stage, allowing for detailed performance analysis.
 
 ## Installation
 
 ```bash
-go get github.com/schraf/pipeline
+go get github.com/schraf/pipeline/v3
 ```
 
 ## Usage
 
 ### Basic Example
 
-To create a pipeline, you define a `PipelineConfig` which specifies the
-pipeline's name, buffer sizes, and an `Executor` function. The `Executor` is
-where you connect your pipeline stages.
+To create a pipeline, you define a `PipelineConfig` and use `NewPipeline`. You then connect stages by calling their `Create` methods.
 
 ```go
 package main
@@ -33,119 +29,88 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/schraf/pipeline"
+	"github.com/schraf/pipeline/v3"
+	"github.com/schraf/pipeline/v3/stages"
 )
 
 func main() {
-	// Define the pipeline configuration
+	ctx := context.Background()
+
+	// 1. Define the pipeline configuration
 	cfg := pipeline.PipelineConfig[int, int]{
-		Name:            "example",
-		InputChannels:   1,
-		OutputChannels:  1,
-		Executor: func(params *pipeline.PipelineParameters[int, int]) {
-			pipe, in, out := params.Pipe, params.In, params.Out
-			// Connect input to output through a Transform stage
-			pipeline.Transform("multiply", pipe, func(ctx context.Context, x int) (*int, error) {
-				result := x * 2
-				return &result, nil
-			}, in.At(0), out.At(0))
+		Name:             "example",
+		InputBufferSize:  10,
+		OutputBufferSize: 10,
+	}
+
+	// 2. Create the pipeline
+	p, _ := pipeline.NewPipeline(ctx, cfg)
+
+	// 3. Connect stages
+	// Transform stage: multiply by 2
+	transformStage := stages.TransformStage[int, int]{
+		Name:   "multiply",
+		Buffer: 10,
+		Transformer: func(ctx context.Context, x int) (*int, error) {
+			result := x * 2
+			return &result, nil
 		},
 	}
 
-	// Create the pipeline
-	p, _ := pipeline.NewPipeline(context.Background(), cfg)
+	// Create the stage, connecting it to the pipeline's first input channel
+	out := transformStage.Create(p.Context(), p.Inputs().Receiver(0))
 
-	// Start processing
+	// 4. Start the pipeline
 	p.Start()
 
-	// Feed data into the pipeline
+	// 5. Feed data into the pipeline
 	go func() {
 		defer p.CloseAllInputs()
-		for i := 1; i <= 10; i++ {
-			p.Inputs().At(0) <- i
+		for i := 1; i <= 5; i++ {
+			p.Inputs().Send(ctx, 0, i)
 		}
 	}()
 
-	// Consume results
-	for v := range p.Outputs().At(0) {
+	// 6. Consume results from the last stage's output channel
+	for v := range out {
 		fmt.Println(v)
 	}
 
-	// Wait for completion and check for errors
+	// 7. Wait for completion and check for errors
 	if err := p.Wait(); err != nil {
 		panic(err)
 	}
 }
 ```
 
-### Chaining Pipelines
+## Pipeline Configuration
 
-You can connect a pipeline to one or more downstream pipelines using the `Chain`
-function. This connects the outputs of the previous pipeline to the inputs of
-the new pipelines automatically. If multiple configurations are provided, the
-data is fanned out to all downstream pipelines.
+The `PipelineConfig` struct specifies the pipeline's basic parameters:
 
-```go
-// Create first pipeline (e.g., generates or transforms data)
-p1, _ := pipeline.NewPipeline(ctx, cfg1)
-
-// Chain two pipelines to the first one.
-// The output of p1 will be broadcast to both p2 and p3.
-// Note: Chain uses p1's context for the new pipelines.
-downstreamPipelines, err := pipeline.Chain(p1, cfg2, cfg3)
-if err != nil {
-    panic(err)
-}
-
-// Start all pipelines
-p1.Start()
-for _, p := range downstreamPipelines {
-    p.Start()
-}
-
-// Feed p1 and consume from p2/p3 (via downstreamPipelines)
-// ...
-```
-
-### Pipeline Groups
-
-The `PipelineGroup` struct allows you to manage a collection of pipelines with
-the same input and output types. It provides methods to add, start, and wait for
-multiple pipelines as a single unit.
-
-```go
-// Create a group for the downstream pipelines
-group := pipeline.NewPipelineGroup[int, int]()
-
-// Add pipelines to the group
-group.Add(downstreamPipelines...)
-
-// Start all pipelines in the group
-if err := group.Start(); err != nil {
-    panic(err)
-}
-
-// Wait for all pipelines in the group to complete
-if err := group.Wait(ctx); err != nil {
-    panic(err)
-}
-```
+- `Name`: Used for tracing and identification.
+- `InputChannels`: Number of input channels to create (defaults to 1).
+- `InputBufferSize`: Buffer size for each input channel.
+- `OutputChannels`: Number of output channels to create (defaults to 1).
+- `OutputBufferSize`: Buffer size for each output channel.
 
 ## Pipeline Stages
 
-Stages are designed to be used inside the `Executor` function of your
-`PipelineConfig`. The `pipe` argument provided to the executor is passed to
-each stage.
+Stages are located in the `github.com/schraf/pipeline/v3/stages` package.
 
 ### Transform
 
 Applies a transformation function to each value:
 
 ```go
-pipeline.Transform("transform", pipe, func(ctx context.Context, x int) (*int, error) {
-    result := x * 2
-    return &result, nil
-}, in, out)
+stage := stages.TransformStage[int, int]{
+    Name:   "transform",
+    Buffer: 10,
+    Transformer: func(ctx context.Context, x int) (*int, error) {
+        result := x * 2
+        return &result, nil
+    },
+}
+out := stage.Create(ctx, in)
 ```
 
 ### Filter
@@ -153,9 +118,30 @@ pipeline.Transform("transform", pipe, func(ctx context.Context, x int) (*int, er
 Filters values based on a predicate:
 
 ```go
-pipeline.Filter("filter", pipe, func(ctx context.Context, x int) (bool, error) {
-    return x%2 == 0, nil
-}, in, out)
+stage := stages.FilterStage[int]{
+    Name:   "filter",
+    Buffer: 10,
+    Filter: func(ctx context.Context, x int) (bool, error) {
+        return x%2 == 0, nil
+    },
+}
+out := stage.Create(ctx, in)
+```
+
+### ParallelTransform
+
+Applies transformation with multiple concurrent workers:
+
+```go
+stage := stages.ParallelTransformStage[int, int]{
+    Name:    "parallel",
+    Buffer:  10,
+    Workers: 5,
+    Transformer: func(ctx context.Context, x int) (*int, error) {
+        return &x, nil
+    },
+}
+out := stage.Create(ctx, in)
 ```
 
 ### Batch
@@ -163,24 +149,15 @@ pipeline.Filter("filter", pipe, func(ctx context.Context, x int) (bool, error) {
 Groups values into fixed-size batches:
 
 ```go
-pipeline.Batch("batch", pipe, func(ctx context.Context, batch []int) (*int, error) {
-    sum := 0
-    for _, v := range batch {
-        sum += v
-    }
-    return &sum, nil
-}, 3, in, out)
-```
-
-### ParallelTransform
-
-Applies transformation with concurrent workers:
-
-```go
-pipeline.ParallelTransform("parallel-transform", pipe, 5, func(ctx context.Context, x int) (*int, error) {
-    result := x * 2
-    return &result, nil
-}, in, out)
+stage := stages.BatchStage[int, []int]{
+    Name:      "batch",
+    Buffer:    10,
+    BatchSize: 5,
+    Batcher: func(ctx context.Context, batch []int) (*[]int, error) {
+        return &batch, nil
+    },
+}
+out := stage.Create(ctx, in)
 ```
 
 ### FanIn
@@ -188,7 +165,11 @@ pipeline.ParallelTransform("parallel-transform", pipe, 5, func(ctx context.Conte
 Merges multiple input channels into one:
 
 ```go
-pipeline.FanIn("fan-in", pipe, out, in1, in2, in3)
+stage := stages.FanInStage[int]{
+    Name:   "fan-in",
+    Buffer: 10,
+}
+out := stage.Create(ctx, multiIn) // multiIn is a MultiChannelReceiver
 ```
 
 ### FanOut
@@ -196,23 +177,25 @@ pipeline.FanIn("fan-in", pipe, out, in1, in2, in3)
 Distributes values to multiple output channels (broadcast):
 
 ```go
-pipeline.FanOut("fan-out", pipe, in, out1, out2, out3)
+stage := stages.FanOutStage[int]{
+    Name:        "fan-out",
+    OutputCount: 3,
+    Buffer:      10,
+}
+outputs := stage.Create(ctx, in) // Returns MultiChannelReceiver
 ```
 
 ### FanOutRoundRobin
 
-Distributes values round-robin style:
+Distributes values to multiple output channels in a round-robin fashion:
 
 ```go
-pipeline.FanOutRoundRobin("fan-out-round-robin", pipe, in, out1, out2, out3)
-```
-
-### Limit
-
-Limits the number of values passed through:
-
-```go
-pipeline.Limit("limit", pipe, 10, in, out)
+stage := stages.FanOutRoundRobinStage[int]{
+    Name:        "fan-out-rr",
+    OutputCount: 3,
+    Buffer:      10,
+}
+outputs := stage.Create(ctx, in)
 ```
 
 ### Split
@@ -220,9 +203,74 @@ pipeline.Limit("limit", pipe, 10, in, out)
 Routes values to different channels based on a selector:
 
 ```go
-pipeline.Split("split", pipe, func(ctx context.Context, x int) int {
-    return (x - 1) % 3
-}, in, out1, out2, out3)
+stage := stages.SplitStage[int]{
+    Name:        "split",
+    OutputCount: 3,
+    Buffer:      10,
+    Selector: func(ctx context.Context, x int) int {
+        return x % 3
+    },
+}
+outputs := stage.Create(ctx, in)
+```
+
+### Reduce
+
+Processes values incrementally using a reducer function:
+
+```go
+stage := stages.ReduceStage[int, int]{
+    Name:         "reduce",
+    Buffer:       1,
+    InitialValue: 0,
+    Reducer: func(ctx context.Context, acc int, x int) (int, error) {
+        return acc + x, nil
+    },
+}
+out := stage.Create(ctx, in)
+```
+
+### Flatten
+
+Takes an input channel of slices and emits each element individually:
+
+```go
+stage := stages.FlattenStage[int]{
+    Name:   "flatten",
+    Buffer: 10,
+}
+out := stage.Create(ctx, inSlices)
+```
+
+### Limit
+
+Limits the number of values passed through the stage:
+
+```go
+stage := stages.LimitStage[int]{
+    Name:   "limit",
+    Buffer: 10,
+    Limit:  5,
+}
+out := stage.Create(ctx, in)
+```
+
+### Expand
+
+Lazily expands single input items into multiple items using an iterator:
+
+```go
+stage := stages.ExpandStage[int, int]{
+    Name:   "expand",
+    Buffer: 10,
+    Expander: func(ctx context.Context, x int) iter.Seq2[int, error] {
+        return func(yield func(int, error) bool) {
+            yield(x, nil)
+            yield(x*10, nil)
+        }
+    },
+}
+out := stage.Create(ctx, in)
 ```
 
 ### Aggregate
@@ -230,50 +278,16 @@ pipeline.Split("split", pipe, func(ctx context.Context, x int) int {
 Collects all values into a single slice:
 
 ```go
-pipeline.Aggregate("aggregate", pipe, in, out)
-```
-
-### Reduce
-
-Processes values incrementally using a reducer function, combining them with an
-accumulator. This allows aggregating results as they come in without keeping
-all values in memory:
-
-```go
-pipeline.Reduce("reduce", pipe, 0, func(ctx context.Context, acc int, x int) (int, error) {
-    return acc + x, nil
-}, in, out)
-```
-
-### Flatten
-
-Takes an input channel of slices and emits each element of each slice as an
-individual item on the output channel:
-
-```go
-pipeline.Flatten("flatten", pipe, in, out)
-```
-
-### Expand
-
-Takes single input items from a channel and for each input, outputs multiple
-items of another type. The expander function returns an iterator
-(`iter.Seq2[Out, error]`) of output items for each input, allowing for lazy
-evaluation and avoiding loading all expanded items into memory at once:
-
-```go
-pipeline.Expand("expand", pipe, func(ctx context.Context, x int) iter.Seq2[string, error] {
-    return func(yield func(string, error) bool) {
-        yield(fmt.Sprintf("%d", x), nil)
-        yield(fmt.Sprintf("%d", x*2), nil)
-    }
-}, in, out)
+stage := stages.AggregateStage[int]{
+    Name:   "aggregate",
+    Buffer: 1,
+}
+out := stage.Create(ctx, in) // out is <-chan []int
 ```
 
 ## Error Handling
 
-The pipeline automatically cancels all stages when an error occurs. The first
-error encountered is returned by `Wait()`:
+The pipeline automatically cancels all stages when an error occurs. The first error encountered is captured and returned by `Wait()`:
 
 ```go
 if err := p.Wait(); err != nil {

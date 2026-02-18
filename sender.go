@@ -7,7 +7,21 @@ import (
 	"iter"
 )
 
-type MultiChannelSender[T any] []chan T
+type OutputChannel[T any] interface {
+	~chan T | ~chan<- T
+}
+
+type MultiChannelSender[T any] []chan<- T
+
+func NewMultiChannelSender[T any, C OutputChannel[T]](out ...C) MultiChannelSender[T] {
+	outputs := make([]chan<- T, len(out))
+
+	for index := range out {
+		outputs[index] = out[index]
+	}
+
+	return MultiChannelSender[T](outputs)
+}
 
 func (m MultiChannelSender[T]) At(index int) chan<- T {
 	if index < 0 || index >= len(m) {

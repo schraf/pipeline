@@ -72,8 +72,8 @@ func NewPipeline[In any, Out any](ctx context.Context, cfg Config[In, Out]) (*Pi
 
 	cfg.Composer(Composer[In, Out]{
 		ctx:     pipeline.context(),
-		inputs:  pipeline.inputs,
-		outputs: pipeline.outputs,
+		inputs:  NewMultiChannelReceiver(pipeline.inputs...),
+		outputs: NewMultiChannelSender(pipeline.outputs...),
 	})
 
 	return pipeline, ctx
@@ -88,11 +88,11 @@ func (p *Pipeline[In, Out]) context() Context {
 }
 
 func (p *Pipeline[In, Out]) Inputs() MultiChannelSender[In] {
-	return MultiChannelSender[In](p.inputs)
+	return NewMultiChannelSender(p.inputs...)
 }
 
 func (p *Pipeline[In, Out]) Outputs() MultiChannelReceiver[Out] {
-	return MultiChannelReceiver[Out](p.outputs)
+	return NewMultiChannelReceiver(p.outputs...)
 }
 
 func (p *Pipeline[In, Out]) Start() error {

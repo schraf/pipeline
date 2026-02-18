@@ -54,5 +54,5 @@ func (s FanOutStage[T]) Create(ctx pipeline.Context, in <-chan T) pipeline.Multi
 		return group.Wait()
 	})
 
-	return pipeline.MultiChannelReceiver[T](outputs)
+	return pipeline.NewMultiChannelReceiver[T](outputs...)
 }

@@ -6,7 +6,21 @@ import (
 	"slices"
 )
 
-type MultiChannelReceiver[T any] []chan T
+type InputChannel[T any] interface {
+	~chan T | ~<-chan T
+}
+
+type MultiChannelReceiver[T any] []<-chan T
+
+func NewMultiChannelReceiver[T any, C InputChannel[T]](in ...C) MultiChannelReceiver[T] {
+	inputs := make([]<-chan T, len(in))
+
+	for index := range in {
+		inputs[index] = in[index]
+	}
+
+	return MultiChannelReceiver[T](inputs)
+}
 
 func (m MultiChannelReceiver[T]) At(index int) <-chan T {
 	if index < 0 || index >= len(m) {

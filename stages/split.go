@@ -52,5 +52,5 @@ func (s SplitStage[T]) Create(ctx pipeline.Context, in <-chan T) pipeline.MultiC
 		return nil
 	})
 
-	return pipeline.MultiChannelReceiver[T](outputs)
+	return pipeline.NewMultiChannelReceiver[T](outputs...)
 }

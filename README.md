@@ -4,11 +4,16 @@ A Go package for building concurrent data processing pipelines using channels.
 
 ## Overview
 
-`pipeline` provides a set of composable stages for processing data streams concurrently. It handles context cancellation, error propagation, and goroutine lifecycle management automatically.
+`pipeline` provides a set of composable stages for processing data streams
+concurrently. It handles context cancellation, error propagation, and goroutine
+lifecycle management automatically.
 
-Stages are defined as structs in the `stages` package. Each stage has a `Create` method that integrates it into a pipeline by connecting input and output channels.
+Stages are defined as structs in the `stages` package. Each stage has a
+`Create` method that integrates it into a pipeline by connecting input and
+output channels.
 
-The package uses Go's `runtime/trace` to create trace regions for each stage, allowing for detailed performance analysis.
+The package uses Go's `runtime/trace` to create trace regions for each stage,
+allowing for detailed performance analysis.
 
 ## Installation
 
@@ -20,7 +25,8 @@ go get github.com/schraf/pipeline/v3
 
 ### Basic Example
 
-To create a pipeline, you define a `PipelineConfig` and use `NewPipeline`. You then connect stages by calling their `Create` methods.
+To create a pipeline, you define a `Config` and use `NewPipeline`. You then
+connect stages by calling their `Create` methods inside the `Composer` function.
 
 ```go
 package main
@@ -36,17 +42,6 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// 1. Define the pipeline configuration
-	cfg := pipeline.PipelineConfig[int, int]{
-		Name:             "example",
-		InputBufferSize:  10,
-		OutputBufferSize: 10,
-	}
-
-	// 2. Create the pipeline
-	p, _ := pipeline.NewPipeline(ctx, cfg)
-
-	// 3. Connect stages
 	// Transform stage: multiply by 2
 	transformStage := stages.TransformStage[int, int]{
 		Name:   "multiply",
@@ -57,27 +52,41 @@ func main() {
 		},
 	}
 
-	// Create the stage, connecting it to the pipeline's first input channel
-	out := transformStage.Create(p.Context(), p.Inputs().Receiver(0))
+    // Configure the pipeline
+	cfg := pipeline.Config[int, int]{
+		Name:             "example",
+		InputBufferSize:  10,
+		OutputBufferSize: 10,
+		Composer: func(composer pipeline.Composer[int, int]) {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
 
-	// 4. Start the pipeline
-	p.Start()
+			out := transformStage.Create(ctx, inputs.At(0))
 
-	// 5. Feed data into the pipeline
+			outputs.Link(ctx, 0, out)
+		},
+	}
+
+	pipe, _ := pipeline.NewPipeline(ctx, cfg)
+
+	pipe.Start()
+
+	// Feed data into the pipeline
 	go func() {
-		defer p.CloseAllInputs()
+		defer pipe.CloseAllInputs()
 		for i := 1; i <= 5; i++ {
-			p.Inputs().Send(ctx, 0, i)
+			pipe.Inputs().Send(ctx, 0, i)
 		}
 	}()
 
-	// 6. Consume results from the last stage's output channel
-	for v := range out {
+	// Consume results from the last stage's output channel
+	for v := range pipe.Outputs().SinkAtIter(ctx, 0) {
 		fmt.Println(v)
 	}
 
-	// 7. Wait for completion and check for errors
-	if err := p.Wait(); err != nil {
+	// Wait for completion and check for errors
+	if err := pipe.Wait(); err != nil {
 		panic(err)
 	}
 }
@@ -85,13 +94,14 @@ func main() {
 
 ## Pipeline Configuration
 
-The `PipelineConfig` struct specifies the pipeline's basic parameters:
+The `Config` struct specifies the pipeline's basic parameters:
 
 - `Name`: Used for tracing and identification.
 - `InputChannels`: Number of input channels to create (defaults to 1).
 - `InputBufferSize`: Buffer size for each input channel.
 - `OutputChannels`: Number of output channels to create (defaults to 1).
 - `OutputBufferSize`: Buffer size for each output channel.
+- `Composer`: Function used to connect the pipeline inputs to outputs.
 
 ## Pipeline Stages
 
@@ -153,9 +163,6 @@ stage := stages.BatchStage[int, []int]{
     Name:      "batch",
     Buffer:    10,
     BatchSize: 5,
-    Batcher: func(ctx context.Context, batch []int) (*[]int, error) {
-        return &batch, nil
-    },
 }
 out := stage.Create(ctx, in)
 ```

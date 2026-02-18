@@ -7,9 +7,9 @@ import (
 )
 
 type Context struct {
-	parent context.Context
-	group  *sync.WaitGroup
-	err    func(error)
+	context.Context
+	group *sync.WaitGroup
+	err   func(error)
 }
 
 func (c Context) Go(name string, fn func(ctx context.Context) error) {
@@ -17,15 +17,10 @@ func (c Context) Go(name string, fn func(ctx context.Context) error) {
 
 	go func() {
 		defer c.group.Done()
-		defer trace.StartRegion(c.parent, name).End()
+		defer trace.StartRegion(c, name).End()
 
-		if err := fn(c.parent); err != nil {
+		if err := fn(c); err != nil {
 			c.err(err)
 		}
 	}()
-}
-
-// Context returns the underlying context.Context
-func (c Context) Context() context.Context {
-	return c.parent
 }

@@ -52,5 +52,5 @@ func (s FanOutRoundRobinStage[T]) Create(ctx pipeline.Context, in <-chan T) pipe
 		return nil
 	})
 
-	return pipeline.MultiChannelReceiver[T](outputs)
+	return pipeline.NewMultiChannelReceiver[T](outputs...)
 }

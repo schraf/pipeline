@@ -2,11 +2,26 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 )
 
-type MultiChannelSender[T any] []chan T
+type OutputChannel[T any] interface {
+	~chan T | ~chan<- T
+}
+
+type MultiChannelSender[T any] []chan<- T
+
+func NewMultiChannelSender[T any, C OutputChannel[T]](out ...C) MultiChannelSender[T] {
+	outputs := make([]chan<- T, len(out))
+
+	for index := range out {
+		outputs[index] = out[index]
+	}
+
+	return MultiChannelSender[T](outputs)
+}
 
 func (m MultiChannelSender[T]) At(index int) chan<- T {
 	if index < 0 || index >= len(m) {
@@ -14,18 +29,6 @@ func (m MultiChannelSender[T]) At(index int) chan<- T {
 	}
 
 	return m[index]
-}
-
-func (m MultiChannelSender[T]) Receiver(index int) <-chan T {
-	if index < 0 || index >= len(m) {
-		panic("runtime error: channel index out of range")
-	}
-
-	return m[index]
-}
-
-func (m MultiChannelSender[T]) Receivers() MultiChannelReceiver[T] {
-	return MultiChannelReceiver[T](m)
 }
 
 func (m MultiChannelSender[T]) Len() int {
@@ -40,6 +43,67 @@ func (m MultiChannelSender[T]) Iter() iter.Seq[chan<- T] {
 			}
 		}
 	}
+}
+
+func (m MultiChannelSender[T]) Link(ctx Context, index int, in <-chan T) error {
+	if index < 0 || index >= len(m) {
+		return fmt.Errorf("runtime error: channel index %d out of range", index)
+	}
+
+	ctx.Go("link", func(ctx context.Context) error {
+		defer close(m[index])
+
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case value, ok := <-in:
+				if !ok {
+					return nil
+				}
+
+				select {
+				case m[index] <- value:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+		}
+	})
+
+	return nil
+}
+
+func (m MultiChannelSender[T]) LinkAll(ctx Context, in MultiChannelReceiver[T]) error {
+	if len(m) != in.Len() {
+		return errors.New("runtime error: channel link size mismatch")
+	}
+
+	for index := 0; index < len(m); index++ {
+		idx := index
+		ctx.Go("link_all", func(ctx context.Context) error {
+			defer close(m[idx])
+
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case value, ok := <-in.At(idx):
+					if !ok {
+						return nil
+					}
+
+					select {
+					case m[idx] <- value:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+			}
+		})
+	}
+
+	return nil
 }
 
 func (m MultiChannelSender[T]) Send(ctx context.Context, index int, values ...T) error {

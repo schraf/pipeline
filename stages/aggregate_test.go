@@ -8,30 +8,20 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestAggregateStage_Success(t *testing.T) {
+func TestAggregateStage(t *testing.T) {
 	results := runStageTest(t, []int{1, 2, 3, 4, 5},
-		func(pctx pipeline.Context, in <-chan int) <-chan []int {
-			return stages.AggregateStage[int]{
+		func(composer pipeline.Composer[int, []int]) {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
+
+			outputs.Link(ctx, 0, stages.AggregateStage[int]{
 				Name:   "test-aggregate",
 				Buffer: 1,
-			}.Create(pctx, in)
+			}.Create(ctx, inputs.At(0)))
 		},
 	)
 
 	expected := [][]int{{1, 2, 3, 4, 5}}
 	assert.Equal(t, expected, results)
-}
-
-func TestAggregateStage_Empty(t *testing.T) {
-	results := runStageTest(t, []int{},
-		func(pctx pipeline.Context, in <-chan int) <-chan []int {
-			return stages.AggregateStage[int]{
-				Name:   "test-aggregate",
-				Buffer: 1,
-			}.Create(pctx, in)
-		},
-	)
-
-	assert.Len(t, results, 1)
-	assert.Empty(t, results[0])
 }

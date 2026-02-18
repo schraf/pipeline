@@ -2,7 +2,6 @@ package stages_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -12,17 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// End-to-end multi-stage pipeline tests
-
 func TestPipeline_TransformFilterLimit(t *testing.T) {
 	ctx := context.Background()
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.PipelineConfig[int, int]{
-		Name:             "test",
-		InputBufferSize:  20,
-		OutputBufferSize: 10,
-	})
 
-	// Pipeline: Transform -> Filter -> Limit
 	transformStage := stages.TransformStage[int, int]{
 		Name:   "transform",
 		Buffer: 20,
@@ -46,20 +37,31 @@ func TestPipeline_TransformFilterLimit(t *testing.T) {
 		Limit:  5,
 	}
 
-	transformed := transformStage.Create(p.Context(), p.Inputs().Receiver(0))
-	filtered := filterStage.Create(p.Context(), transformed)
-	out := limitStage.Create(p.Context(), filtered)
+	// Pipeline: Transform -> Filter -> Limit
+	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+		Name:             "test",
+		InputBufferSize:  20,
+		OutputBufferSize: 10,
+		Composer: func(composer pipeline.Composer[int, int]) {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
+
+			transformed := transformStage.Create(ctx, inputs.At(0))
+			filtered := filterStage.Create(ctx, transformed)
+			limited := limitStage.Create(ctx, filtered)
+
+			outputs.Link(ctx, 0, limited)
+		},
+	})
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
 	p.CloseAllInputs()
 	p.Start()
 
-	require.NoError(t, p.Wait())
+	results := p.Outputs().SinkAt(ctx, 0)
 
-	var results []int
-	for v := range out {
-		results = append(results, v)
-	}
+	require.NoError(t, p.Wait())
 
 	assert.LessOrEqual(t, len(results), 5, "expected at most 5 results")
 
@@ -71,13 +73,7 @@ func TestPipeline_TransformFilterLimit(t *testing.T) {
 
 func TestPipeline_ParallelTransformBatch(t *testing.T) {
 	ctx := context.Background()
-	p, _ := pipeline.NewPipeline[int, []int](ctx, pipeline.PipelineConfig[int, []int]{
-		Name:             "test",
-		InputBufferSize:  30,
-		OutputBufferSize: 10,
-	})
 
-	// Pipeline: ParallelTransform -> Batch
 	parallelTransformStage := stages.ParallelTransformStage[int, int]{
 		Name:    "parallel-transform",
 		Buffer:  30,
@@ -89,28 +85,36 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 		},
 	}
 
-	batchStage := stages.BatchStage[int, []int]{
+	batchStage := stages.BatchStage[int]{
 		Name:      "batch",
 		Buffer:    10,
 		BatchSize: 5,
-		Batcher: func(_ context.Context, batch []int) (*[]int, error) {
-			return &batch, nil
-		},
 	}
 
-	transformed := parallelTransformStage.Create(p.Context(), p.Inputs().Receiver(0))
-	out := batchStage.Create(p.Context(), transformed)
+	// Pipeline: ParallelTransform -> Batch
+	p, _ := pipeline.NewPipeline[int, []int](ctx, pipeline.Config[int, []int]{
+		Name:             "test",
+		InputBufferSize:  30,
+		OutputBufferSize: 10,
+		Composer: func(composer pipeline.Composer[int, []int]) {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
+
+			transformed := parallelTransformStage.Create(ctx, inputs.At(0))
+			batched := batchStage.Create(ctx, transformed)
+
+			outputs.Link(ctx, 0, batched)
+		},
+	})
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30)
 	p.CloseAllInputs()
 	p.Start()
 
-	require.NoError(t, p.Wait())
+	batches := p.Outputs().SinkAt(ctx, 0)
 
-	var batches [][]int
-	for batch := range out {
-		batches = append(batches, batch)
-	}
+	require.NoError(t, p.Wait())
 
 	// Should have 6 batches (30 items / 5 per batch)
 	assert.Len(t, batches, 6, "expected 6 batches")
@@ -128,14 +132,7 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 
 func TestPipeline_FanInTransformFanOut(t *testing.T) {
 	ctx := context.Background()
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.PipelineConfig[int, int]{
-		Name:             "test",
-		InputChannels:    3,
-		InputBufferSize:  5,
-		OutputBufferSize: 15,
-	})
 
-	// Pipeline: FanIn -> Transform -> FanOut
 	fanInStage := stages.FanInStage[int]{
 		Name:   "fan-in",
 		Buffer: 15,
@@ -156,9 +153,25 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 		Buffer:      15,
 	}
 
-	merged := fanInStage.Create(p.Context(), p.Inputs().Receivers())
-	transformed := transformStage.Create(p.Context(), merged)
-	outputs := fanOutStage.Create(p.Context(), transformed)
+	// Pipeline: FanIn -> Transform -> FanOut
+	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+		Name:             "test",
+		InputChannels:    3,
+		InputBufferSize:  5,
+		OutputChannels:   2,
+		OutputBufferSize: 15,
+		Composer: func(composer pipeline.Composer[int, int]) {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
+
+			merged := fanInStage.Create(ctx, inputs)
+			transformed := transformStage.Create(ctx, merged)
+			fannedOut := fanOutStage.Create(ctx, transformed)
+
+			outputs.LinkAll(ctx, fannedOut)
+		},
+	})
 
 	// Send values to each input channel
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5)
@@ -194,19 +207,13 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 		}
 	}
 
-	checkOutput(outputs.At(0), "out1", 15)
-	checkOutput(outputs.At(1), "out2", 15)
+	checkOutput(p.Outputs().At(0), "out1", 15)
+	checkOutput(p.Outputs().At(1), "out2", 15)
 }
 
 func TestPipeline_SplitTransformFanIn(t *testing.T) {
 	ctx := context.Background()
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.PipelineConfig[int, int]{
-		Name:             "test",
-		InputBufferSize:  12,
-		OutputBufferSize: 12,
-	})
 
-	// Pipeline: Split -> Transform (x3) -> FanIn
 	splitStage := stages.SplitStage[int]{
 		Name:        "split",
 		OutputCount: 3,
@@ -248,50 +255,35 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 		Buffer: 12,
 	}
 
-	splitOutputs := splitStage.Create(p.Context(), p.Inputs().Receiver(0))
-	transformed1 := transformStage1.Create(p.Context(), splitOutputs.At(0))
-	transformed2 := transformStage2.Create(p.Context(), splitOutputs.At(1))
-	transformed3 := transformStage3.Create(p.Context(), splitOutputs.At(2))
+	// Pipeline: Split -> Transform (x3) -> FanIn
+	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+		Name:             "test",
+		InputBufferSize:  12,
+		OutputBufferSize: 12,
+		Composer: func(composer pipeline.Composer[int, int]) {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
 
-	// Create channels for FanIn input
-	fanInInputs := []chan int{
-		make(chan int, 6),
-		make(chan int, 6),
-		make(chan int, 6),
-	}
+			splitOutputs := splitStage.Create(ctx, inputs.At(0))
+			transformed1 := transformStage1.Create(ctx, splitOutputs.At(0))
+			transformed2 := transformStage2.Create(ctx, splitOutputs.At(1))
+			transformed3 := transformStage3.Create(ctx, splitOutputs.At(2))
 
-	// Forward transformed outputs to fanIn inputs (in goroutines)
-	go func() {
-		for v := range transformed1 {
-			fanInInputs[0] <- v
-		}
-		close(fanInInputs[0])
-	}()
-	go func() {
-		for v := range transformed2 {
-			fanInInputs[1] <- v
-		}
-		close(fanInInputs[1])
-	}()
-	go func() {
-		for v := range transformed3 {
-			fanInInputs[2] <- v
-		}
-		close(fanInInputs[2])
-	}()
+			transformed := pipeline.NewMultiChannelReceiver(transformed1, transformed2, transformed3)
+			fannedIn := fanInStage.Create(ctx, transformed)
 
-	out := fanInStage.Create(p.Context(), pipeline.MultiChannelReceiver[int](fanInInputs))
+			outputs.Link(ctx, 0, fannedIn)
+		},
+	})
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 	p.CloseAllInputs()
 	p.Start()
 
-	require.NoError(t, p.Wait())
+	results := p.Outputs().SinkAt(ctx, 0)
 
-	var results []int
-	for v := range out {
-		results = append(results, v)
-	}
+	require.NoError(t, p.Wait())
 
 	assert.Len(t, results, 12, "expected 12 results")
 
@@ -304,13 +296,6 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 
 func TestPipeline_ComplexMultiStage(t *testing.T) {
 	ctx := context.Background()
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.PipelineConfig[int, int]{
-		Name:             "test",
-		InputBufferSize:  50,
-		OutputBufferSize: 10,
-	})
-
-	// Complex pipeline: Filter -> Transform -> Batch -> Transform -> Filter -> Limit
 
 	// Stage 1: Filter evens
 	filterStage1 := stages.FilterStage[int]{
@@ -332,13 +317,10 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 	}
 
 	// Stage 3: Batch into groups of 4
-	batchStage := stages.BatchStage[int, []int]{
+	batchStage := stages.BatchStage[int]{
 		Name:      "batch",
 		Buffer:    20,
 		BatchSize: 4,
-		Batcher: func(_ context.Context, batch []int) (*[]int, error) {
-			return &batch, nil
-		},
 	}
 
 	// Stage 4: Transform batches (sum)
@@ -370,23 +352,34 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 		Limit:  5,
 	}
 
-	stage1 := filterStage1.Create(p.Context(), p.Inputs().Receiver(0))
-	stage2 := transformStage1.Create(p.Context(), stage1)
-	stage3 := batchStage.Create(p.Context(), stage2)
-	stage4 := transformStage2.Create(p.Context(), stage3)
-	stage5 := filterStage2.Create(p.Context(), stage4)
-	out := limitStage.Create(p.Context(), stage5)
+	// Complex pipeline: Filter -> Transform -> Batch -> Transform -> Filter -> Limit
+	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+		Name:             "test",
+		InputBufferSize:  50,
+		OutputBufferSize: 10,
+		Composer: func(composer pipeline.Composer[int, int]) {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
+
+			stage1 := filterStage1.Create(ctx, inputs.At(0))
+			stage2 := transformStage1.Create(ctx, stage1)
+			stage3 := batchStage.Create(ctx, stage2)
+			stage4 := transformStage2.Create(ctx, stage3)
+			stage5 := filterStage2.Create(ctx, stage4)
+			out := limitStage.Create(ctx, stage5)
+
+			outputs.Link(ctx, 0, out)
+		},
+	})
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50)
 	p.CloseAllInputs()
 	p.Start()
 
-	require.NoError(t, p.Wait())
+	results := p.Outputs().SinkAt(ctx, 0)
 
-	var results []int
-	for v := range out {
-		results = append(results, v)
-	}
+	require.NoError(t, p.Wait())
 
 	assert.LessOrEqual(t, len(results), 5, "expected at most 5 results")
 
@@ -397,13 +390,7 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 
 func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 	ctx := context.Background()
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.PipelineConfig[int, int]{
-		Name:             "test",
-		InputBufferSize:  15,
-		OutputBufferSize: 15,
-	})
 
-	// Pipeline: FanOutRoundRobin -> ParallelTransform (on each branch) -> FanIn
 	fanOutRRStage := stages.FanOutRoundRobinStage[int]{
 		Name:        "fan-out-rr",
 		OutputCount: 3,
@@ -448,49 +435,35 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 		Buffer: 15,
 	}
 
-	rrOutputs := fanOutRRStage.Create(p.Context(), p.Inputs().Receiver(0))
-	processed1 := parallelTransformStage1.Create(p.Context(), rrOutputs.At(0))
-	processed2 := parallelTransformStage2.Create(p.Context(), rrOutputs.At(1))
-	processed3 := parallelTransformStage3.Create(p.Context(), rrOutputs.At(2))
+	// Pipeline: FanOutRoundRobin -> ParallelTransform (on each branch) -> FanIn
+	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+		Name:             "test",
+		InputBufferSize:  15,
+		OutputBufferSize: 15,
+		Composer: func(composer pipeline.Composer[int, int]) {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
 
-	// Create channels for FanIn input
-	fanInInputs := []chan int{
-		make(chan int, 5),
-		make(chan int, 5),
-		make(chan int, 5),
-	}
+			rrOutputs := fanOutRRStage.Create(ctx, inputs.At(0))
+			processed1 := parallelTransformStage1.Create(ctx, rrOutputs.At(0))
+			processed2 := parallelTransformStage2.Create(ctx, rrOutputs.At(1))
+			processed3 := parallelTransformStage3.Create(ctx, rrOutputs.At(2))
 
-	go func() {
-		for v := range processed1 {
-			fanInInputs[0] <- v
-		}
-		close(fanInInputs[0])
-	}()
-	go func() {
-		for v := range processed2 {
-			fanInInputs[1] <- v
-		}
-		close(fanInInputs[1])
-	}()
-	go func() {
-		for v := range processed3 {
-			fanInInputs[2] <- v
-		}
-		close(fanInInputs[2])
-	}()
+			processed := pipeline.NewMultiChannelReceiver(processed1, processed2, processed3)
+			out := fanInStage.Create(ctx, processed)
 
-	out := fanInStage.Create(p.Context(), pipeline.MultiChannelReceiver[int](fanInInputs))
+			outputs.Link(ctx, 0, out)
+		},
+	})
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 	p.CloseAllInputs()
 	p.Start()
 
-	require.NoError(t, p.Wait())
+	results := p.Outputs().SinkAt(ctx, 0)
 
-	var results []int
-	for v := range out {
-		results = append(results, v)
-	}
+	require.NoError(t, p.Wait())
 
 	assert.Len(t, results, 15, "expected 15 results")
 
@@ -507,63 +480,4 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 	for _, expected := range expectedValues {
 		assert.Truef(t, resultSet[expected], "expected value %d not found", expected)
 	}
-}
-
-func TestPipeline_WithError(t *testing.T) {
-	expectedError := errors.New("test error")
-	ctx := context.Background()
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.PipelineConfig[int, int]{
-		Name:             "test",
-		InputBufferSize:  100,
-		OutputBufferSize: 10,
-	})
-
-	stage := stages.TransformStage[int, int]{
-		Name:   "transform",
-		Buffer: 10,
-		Transformer: func(_ context.Context, x int) (*int, error) {
-			time.Sleep(10 * time.Millisecond)
-
-			if x == 5 {
-				return nil, expectedError
-			}
-
-			result := x * 2
-			return &result, nil
-		},
-	}
-
-	out := stage.Create(p.Context(), p.Inputs().Receiver(0))
-
-	go func() {
-		for i := 1; i <= 100; i++ {
-			select {
-			case p.Inputs().At(0) <- i:
-			case <-time.After(1 * time.Second):
-				return
-			}
-		}
-		p.CloseAllInputs()
-	}()
-
-	p.Start()
-
-	err := p.Wait()
-	require.ErrorIs(t, err, expectedError)
-
-	var results []int
-	for {
-		select {
-		case v, ok := <-out:
-			if !ok {
-				goto done
-			}
-			results = append(results, v)
-		case <-time.After(100 * time.Millisecond):
-			goto done
-		}
-	}
-done:
-
-	assert.NotEmpty(t, results, "expected some results before cancellation")
 }

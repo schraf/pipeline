@@ -288,10 +288,9 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 	assert.Len(t, results, 12, "expected 12 results")
 
 	// Verify routing: values 1,4,7,10 -> *10; 2,5,8,11 -> *20; 3,6,9,12 -> *30
-	// Expected values: 10, 40, 70, 100, 40, 100, 160, 220, 90, 180, 270, 360
-	for _, v := range results {
-		assert.True(t, v > 0, "expected positive value, got: %d", v)
-	}
+	expected := []int{10, 40, 70, 100, 40, 100, 160, 220, 90, 180, 270, 360}
+
+	assertUnorderedEqual(t, expected, results)
 }
 
 func TestPipeline_ComplexMultiStage(t *testing.T) {
@@ -467,17 +466,10 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 
 	assert.Len(t, results, 15, "expected 15 results")
 
-	// Verify all results are present (values may be out of order)
-	resultSet := make(map[int]bool)
-	for _, v := range results {
-		resultSet[v] = true
-	}
-
 	// 1,4,7,10,13 -> *100 = 100,400,700,1000,1300
 	// 2,5,8,11,14 -> *200 = 400,1000,1600,2200,2800
 	// 3,6,9,12,15 -> *300 = 900,1800,2700,3600,4500
-	expectedValues := []int{100, 400, 700, 1000, 1300, 400, 1000, 1600, 2200, 2800, 900, 1800, 2700, 3600, 4500}
-	for _, expected := range expectedValues {
-		assert.Truef(t, resultSet[expected], "expected value %d not found", expected)
-	}
+	expected := []int{100, 400, 700, 1000, 1300, 400, 1000, 1600, 2200, 2800, 900, 1800, 2700, 3600, 4500}
+
+	assertUnorderedEqual(t, expected, results)
 }

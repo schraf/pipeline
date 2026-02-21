@@ -4,9 +4,9 @@ package pipeline
 // construction of it
 type Config[In any, Out any] struct {
 	Name             string
-	InputChannels    int
-	InputBufferSize  int
-	OutputChannels   int
-	OutputBufferSize int
-	Composer         func(Composer[In, Out])
+	InputChannels    uint
+	InputBufferSize  uint
+	OutputChannels   uint
+	OutputBufferSize uint
+	Composer         func(Composer[In, Out]) error
 }

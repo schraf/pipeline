@@ -23,12 +23,14 @@ func NewMultiChannelSender[T any, C OutputChannel[T]](out ...C) MultiChannelSend
 	return MultiChannelSender[T](outputs)
 }
 
-func (m MultiChannelSender[T]) At(index int) chan<- T {
+// At returns the channel at the given index. It panics if the index is out of
+// range, following the same convention as Go slice indexing.
+func (m MultiChannelSender[T]) At(index int) (chan<- T, bool) {
 	if index < 0 || index >= len(m) {
-		panic("runtime error: channel index out of range")
+		return nil, false
 	}
 
-	return m[index]
+	return m[index], true
 }
 
 func (m MultiChannelSender[T]) Len() int {

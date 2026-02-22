@@ -5,6 +5,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime/trace"
 	"sync"
@@ -13,30 +14,50 @@ import (
 
 const (
 	stateInvalid int32 = iota
-	stateCreated
 	stateStarted
 	stateWaiting
 	stateDone
 )
 
+var stateNames = map[int32]string{
+	stateInvalid: "Invalid",
+	stateStarted: "Started",
+	stateWaiting: "Waiting",
+	stateDone:    "Done",
+}
+
+func stateName(s int32) string {
+	if name, ok := stateNames[s]; ok {
+		return name
+	}
+
+	return fmt.Sprintf("Unknown(%d)", s)
+}
+
 // Pipeline coordinates concurrent processing stages, managing their lifecycle
 // and propagating errors and cancellation signals across all stages.
 type Pipeline[In any, Out any] struct {
-	state   atomic.Int32
-	cancel  context.CancelCauseFunc
-	ctx     context.Context
-	group   sync.WaitGroup
-	errOnce sync.Once
-	task    *trace.Task
-	err     error
-	inputs  []chan In
-	outputs []chan Out
+	state      atomic.Int32
+	cancel     context.CancelCauseFunc
+	ctx        context.Context
+	group      sync.WaitGroup
+	cancelOnce sync.Once
+	closeOnce  sync.Once
+	task       *trace.Task
+	errLock    sync.Mutex
+	err        error
+	inputs     []chan In
+	outputs    []chan Out
 }
 
 // NewPipeline creates a new Pipeline and a derived context for coordinating
 // pipeline stages. The returned context is cancelled when any stage encounters
 // an error. Use the returned Pipeline to register stages and wait for completion.
-func NewPipeline[In any, Out any](ctx context.Context, cfg Config[In, Out]) (*Pipeline[In, Out], context.Context) {
+func NewPipeline[In any, Out any](ctx context.Context, cfg Config[In, Out]) (*Pipeline[In, Out], context.Context, error) {
+	if cfg.Composer == nil {
+		return nil, ctx, fmt.Errorf("pipeline: Config.Composer must not be nil")
+	}
+
 	ctx, task := trace.NewTask(ctx, cfg.Name)
 	ctx, cancel := context.WithCancelCause(ctx)
 
@@ -68,15 +89,19 @@ func NewPipeline[In any, Out any](ctx context.Context, cfg Config[In, Out]) (*Pi
 		outputs: outputs,
 	}
 
-	pipeline.state.Store(stateCreated)
+	pipeline.state.Store(stateStarted)
 
-	cfg.Composer(Composer[In, Out]{
+	if err := cfg.Composer(Composer[In, Out]{
 		ctx:     pipeline.context(),
 		inputs:  NewMultiChannelReceiver(pipeline.inputs...),
 		outputs: NewMultiChannelSender(pipeline.outputs...),
-	})
+	}); err != nil {
+		cancel(err)
+		task.End()
+		return nil, ctx, fmt.Errorf("pipeline: composer failed: %w", err)
+	}
 
-	return pipeline, ctx
+	return pipeline, ctx, nil
 }
 
 func (p *Pipeline[In, Out]) context() Context {
@@ -95,28 +120,25 @@ func (p *Pipeline[In, Out]) Outputs() MultiChannelReceiver[Out] {
 	return NewMultiChannelReceiver(p.outputs...)
 }
 
-func (p *Pipeline[In, Out]) Start() error {
-	if !p.state.CompareAndSwap(stateCreated, stateStarted) {
-		return fmt.Errorf("unable to start pipeline, unexpected state: %d", p.state.Load())
-	}
-
-	return nil
-}
-
-// CloseAllInputs will close all of the input channels
+// CloseAllInputs will close all of the input channels. It is safe to call
+// multiple times; only the first call will close the channels.
 func (p *Pipeline[In, Out]) CloseAllInputs() {
-	for _, input := range p.inputs {
-		close(input)
-	}
+	p.closeOnce.Do(func() {
+		for _, input := range p.inputs {
+			close(input)
+		}
+	})
 }
 
-// Wait blocks until all registered stages complete and returns the first error
-// encountered by any stage, or nil if all stages completed successfully.
+// Wait blocks until all registered stages complete and returns all errors
+// encountered by any stage (joined via errors.Join), or nil if all stages
+// completed successfully.
 func (p *Pipeline[In, Out]) Wait() error {
 	if !p.state.CompareAndSwap(stateStarted, stateWaiting) {
-		return fmt.Errorf("unable to wait on pipeline, unexpected state: %d", p.state.Load())
+		return fmt.Errorf("unable to wait on pipeline, unexpected state: %s", stateName(p.state.Load()))
 	}
 
+	defer p.cancel(nil)
 	defer p.task.End()
 	defer p.state.Store(stateDone)
 	p.group.Wait()
@@ -124,10 +146,15 @@ func (p *Pipeline[In, Out]) Wait() error {
 }
 
 func (p *Pipeline[In, Out]) setError(err error) {
-	p.errOnce.Do(func() {
-		p.err = err
+	// Cancel the context on the first error to signal all stages to stop.
+	p.cancelOnce.Do(func() {
 		if p.cancel != nil {
 			p.cancel(err)
 		}
 	})
+
+	// Aggregate all errors so the caller gets full visibility.
+	p.errLock.Lock()
+	p.err = errors.Join(p.err, err)
+	p.errLock.Unlock()
 }

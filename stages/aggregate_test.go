@@ -10,12 +10,12 @@ import (
 
 func TestAggregateStage(t *testing.T) {
 	results := runStageTest(t, []int{1, 2, 3, 4, 5},
-		func(composer pipeline.Composer[int, []int]) {
+		func(composer pipeline.Composer[int, []int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
 
-			outputs.Link(ctx, 0, stages.AggregateStage[int]{
+			return outputs.Link(ctx, 0, stages.AggregateStage[int]{
 				Name:   "test-aggregate",
 				Buffer: 1,
 			}.Create(ctx, inputs.At(0)))

@@ -22,9 +22,9 @@ func NewMultiChannelReceiver[T any, C InputChannel[T]](in ...C) MultiChannelRece
 	return MultiChannelReceiver[T](inputs)
 }
 
-func (m MultiChannelReceiver[T]) At(index int) <-chan T {
-	if index < 0 || index >= len(m) {
-		panic("runtime error: channel index out of range")
+func (m MultiChannelReceiver[T]) At(index uint) <-chan T {
+	if int(index) >= len(m) {
+		return nil
 	}
 
 	return m[index]
@@ -44,12 +44,12 @@ func (m MultiChannelReceiver[T]) Iter() iter.Seq[<-chan T] {
 	}
 }
 
-func (m MultiChannelReceiver[T]) SinkAtIter(ctx context.Context, index int) iter.Seq[T] {
-	if index < 0 || index >= len(m) {
-		panic("runtime error: channel index out of range")
-	}
-
+func (m MultiChannelReceiver[T]) SinkAtIter(ctx context.Context, index uint) iter.Seq[T] {
 	return func(yield func(T) bool) {
+		if int(index) >= len(m) {
+			return
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -67,6 +67,6 @@ func (m MultiChannelReceiver[T]) SinkAtIter(ctx context.Context, index int) iter
 	}
 }
 
-func (m MultiChannelReceiver[T]) SinkAt(ctx context.Context, index int) []T {
+func (m MultiChannelReceiver[T]) SinkAt(ctx context.Context, index uint) []T {
 	return slices.Collect(m.SinkAtIter(ctx, index))
 }

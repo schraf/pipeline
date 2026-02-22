@@ -12,27 +12,27 @@ import (
 func TestFanOutStage(t *testing.T) {
 	ctx := context.Background()
 
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+	p, _, err := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
 		Name:             "test",
 		InputBufferSize:  3,
 		OutputChannels:   3,
 		OutputBufferSize: 3,
-		Composer: func(composer pipeline.Composer[int, int]) {
+		Composer: func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
 
-			outputs.LinkAll(ctx, stages.FanOutStage[int]{
+			return outputs.LinkAll(ctx, stages.FanOutStage[int]{
 				Name:        "test-fan-out",
 				OutputCount: 3,
 				Buffer:      3,
 			}.Create(ctx, inputs.At(0)))
 		},
 	})
+	require.NoError(t, err)
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3)
 	p.CloseAllInputs()
-	p.Start()
 
 	require.NoError(t, p.Wait())
 

@@ -14,8 +14,8 @@ import (
 
 type FanOutStage[T any] struct {
 	Name        string
-	OutputCount int
-	Buffer      int
+	OutputCount uint
+	Buffer      uint
 }
 
 func (s FanOutStage[T]) Create(ctx pipeline.Context, in <-chan T) pipeline.MultiChannelReceiver[T] {
@@ -32,26 +32,34 @@ func (s FanOutStage[T]) Create(ctx pipeline.Context, in <-chan T) pipeline.Multi
 		}()
 
 		group, gctx := errgroup.WithContext(pctx)
+		group.SetLimit(int(s.OutputCount))
 
-		for input := range in {
-			capturedInput := input
+		for {
+			select {
+			case <-pctx.Done():
+				return group.Wait()
+			case input, ok := <-in:
+				if !ok {
+					return group.Wait()
+				}
 
-			for _, outputChannel := range outputs {
-				capturedOutputChannel := outputChannel
+				capturedInput := input
 
-				group.Go(func() error {
-					select {
-					case <-gctx.Done():
-						return gctx.Err()
-					case capturedOutputChannel <- capturedInput:
-					}
+				for _, outputChannel := range outputs {
+					capturedOutputChannel := outputChannel
 
-					return nil
-				})
+					group.Go(func() error {
+						select {
+						case <-gctx.Done():
+							return gctx.Err()
+						case capturedOutputChannel <- capturedInput:
+						}
+
+						return nil
+					})
+				}
 			}
 		}
-
-		return group.Wait()
 	})
 
 	return pipeline.NewMultiChannelReceiver[T](outputs...)

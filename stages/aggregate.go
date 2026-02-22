@@ -13,7 +13,7 @@ import (
 
 type AggregateStage[T any] struct {
 	Name   string
-	Buffer int
+	Buffer uint
 }
 
 func (s AggregateStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan []T {

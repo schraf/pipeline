@@ -12,12 +12,12 @@ import (
 
 func TestExpandStage(t *testing.T) {
 	results := runStageTest(t, []int{1, 2, 3},
-		func(composer pipeline.Composer[int, int]) {
+		func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
 
-			outputs.Link(ctx, 0, stages.ExpandStage[int, int]{
+			return outputs.Link(ctx, 0, stages.ExpandStage[int, int]{
 				Name:   "test-expand",
 				Buffer: 10,
 				Expander: func(ctx context.Context, x int) iter.Seq2[int, error] {

@@ -11,17 +11,17 @@ import (
 
 func TestTransformStage(t *testing.T) {
 	results := runStageTest(t, []int{1, 2, 3, 4, 5},
-		func(composer pipeline.Composer[int, int]) {
+		func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
 
-			outputs.Link(ctx, 0, stages.TransformStage[int, int]{
+			return outputs.Link(ctx, 0, stages.TransformStage[int, int]{
 				Name:   "test-transform",
 				Buffer: 5,
-				Transformer: func(_ context.Context, x int) (*int, error) {
+				Transformer: func(_ context.Context, x int) (int, error) {
 					result := x * 2
-					return &result, nil
+					return result, nil
 				},
 			}.Create(ctx, inputs.At(0)))
 		},

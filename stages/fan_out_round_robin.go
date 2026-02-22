@@ -14,15 +14,11 @@ import (
 
 type FanOutRoundRobinStage[T any] struct {
 	Name        string
-	OutputCount int
-	Buffer      int
+	OutputCount uint
+	Buffer      uint
 }
 
 func (s FanOutRoundRobinStage[T]) Create(ctx pipeline.Context, in <-chan T) pipeline.MultiChannelReceiver[T] {
-	if s.OutputCount == 0 {
-		panic("FanOutRoundRobinStage: OutputCount must be greater than zero")
-	}
-
 	outputs := make([]chan T, s.OutputCount)
 	for i := range outputs {
 		outputs[i] = make(chan T, s.Buffer)
@@ -37,19 +33,29 @@ func (s FanOutRoundRobinStage[T]) Create(ctx pipeline.Context, in <-chan T) pipe
 
 		index := 0
 
-		for input := range in {
-			outputChannel := outputs[index%len(outputs)]
-
+		for {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case outputChannel <- input:
+			case input, ok := <-in:
+				if !ok {
+					return nil
+				}
+
+				outputChannel := outputs[index]
+
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case outputChannel <- input:
+				}
+
+				index++
+				if index >= len(outputs) {
+					index = 0
+				}
 			}
-
-			index++
 		}
-
-		return nil
 	})
 
 	return pipeline.NewMultiChannelReceiver[T](outputs...)

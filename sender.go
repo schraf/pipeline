@@ -2,8 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"iter"
 )
 
@@ -23,9 +21,9 @@ func NewMultiChannelSender[T any, C OutputChannel[T]](out ...C) MultiChannelSend
 	return MultiChannelSender[T](outputs)
 }
 
-func (m MultiChannelSender[T]) At(index int) chan<- T {
-	if index < 0 || index >= len(m) {
-		panic("runtime error: channel index out of range")
+func (m MultiChannelSender[T]) At(index uint) chan<- T {
+	if int(index) >= len(m) {
+		return nil
 	}
 
 	return m[index]
@@ -45,9 +43,9 @@ func (m MultiChannelSender[T]) Iter() iter.Seq[chan<- T] {
 	}
 }
 
-func (m MultiChannelSender[T]) Link(ctx Context, index int, in <-chan T) error {
-	if index < 0 || index >= len(m) {
-		return fmt.Errorf("runtime error: channel index %d out of range", index)
+func (m MultiChannelSender[T]) Link(ctx Context, index uint, in <-chan T) error {
+	if int(index) >= len(m) {
+		return ErrInvalidChannel
 	}
 
 	ctx.Go("link", func(ctx context.Context) error {
@@ -76,7 +74,7 @@ func (m MultiChannelSender[T]) Link(ctx Context, index int, in <-chan T) error {
 
 func (m MultiChannelSender[T]) LinkAll(ctx Context, in MultiChannelReceiver[T]) error {
 	if len(m) != in.Len() {
-		return errors.New("runtime error: channel link size mismatch")
+		return ErrInvalidChannel
 	}
 
 	for index := 0; index < len(m); index++ {
@@ -88,7 +86,7 @@ func (m MultiChannelSender[T]) LinkAll(ctx Context, in MultiChannelReceiver[T]) 
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case value, ok := <-in.At(idx):
+				case value, ok := <-in[idx]:
 					if !ok {
 						return nil
 					}
@@ -106,9 +104,9 @@ func (m MultiChannelSender[T]) LinkAll(ctx Context, in MultiChannelReceiver[T]) 
 	return nil
 }
 
-func (m MultiChannelSender[T]) Send(ctx context.Context, index int, values ...T) error {
-	if index < 0 || index >= len(m) {
-		return fmt.Errorf("runtime error: channel index %d out of range", index)
+func (m MultiChannelSender[T]) Send(ctx context.Context, index uint, values ...T) error {
+	if int(index) >= len(m) {
+		return ErrInvalidChannel
 	}
 
 	for _, value := range values {

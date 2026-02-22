@@ -3,16 +3,19 @@ package stages_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/schraf/pipeline/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+const testTimeout = 10 * time.Second
+
 func runStageTest[In any, Out any](
 	t *testing.T,
 	inputs []In,
-	composer func(composer pipeline.Composer[In, Out]),
+	composer func(composer pipeline.Composer[In, Out]) error,
 ) []Out {
 	t.Helper()
 
@@ -21,18 +24,19 @@ func runStageTest[In any, Out any](
 		bufSize = 1
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
-	p, _ := pipeline.NewPipeline[In, Out](ctx, pipeline.Config[In, Out]{
+	p, _, err := pipeline.NewPipeline[In, Out](ctx, pipeline.Config[In, Out]{
 		Name:             "test",
-		InputBufferSize:  bufSize,
-		OutputBufferSize: bufSize,
+		InputBufferSize:  uint(bufSize),
+		OutputBufferSize: uint(bufSize),
 		Composer:         composer,
 	})
+	require.NoError(t, err)
 
-	p.Inputs().Send(ctx, 0, inputs...)
+	require.NoError(t, p.Inputs().Send(ctx, 0, inputs...))
 	p.CloseAllInputs()
-	p.Start()
 
 	results := p.Outputs().SinkAt(ctx, 0)
 

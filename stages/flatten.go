@@ -14,7 +14,7 @@ import (
 
 type FlattenStage[T any] struct {
 	Name   string
-	Buffer int
+	Buffer uint
 }
 
 func (s FlattenStage[T]) Create(ctx pipeline.Context, in <-chan []T) <-chan T {
@@ -23,17 +23,24 @@ func (s FlattenStage[T]) Create(ctx pipeline.Context, in <-chan []T) <-chan T {
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
 
-		for slice := range in {
-			for _, item := range slice {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case out <- item:
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case slice, ok := <-in:
+				if !ok {
+					return nil
+				}
+
+				for _, item := range slice {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case out <- item:
+					}
 				}
 			}
 		}
-
-		return nil
 	})
 
 	return out

@@ -12,14 +12,15 @@ import (
 )
 
 func TestPipeline_TransformFilterLimit(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	transformStage := stages.TransformStage[int, int]{
 		Name:   "transform",
 		Buffer: 20,
-		Transformer: func(_ context.Context, x int) (*int, error) {
+		Transformer: func(_ context.Context, x int) (int, error) {
 			result := x * 2
-			return &result, nil
+			return result, nil
 		},
 	}
 
@@ -38,11 +39,11 @@ func TestPipeline_TransformFilterLimit(t *testing.T) {
 	}
 
 	// Pipeline: Transform -> Filter -> Limit
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+	p, _, err := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
 		Name:             "test",
 		InputBufferSize:  20,
 		OutputBufferSize: 10,
-		Composer: func(composer pipeline.Composer[int, int]) {
+		Composer: func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
@@ -51,13 +52,13 @@ func TestPipeline_TransformFilterLimit(t *testing.T) {
 			filtered := filterStage.Create(ctx, transformed)
 			limited := limitStage.Create(ctx, filtered)
 
-			outputs.Link(ctx, 0, limited)
+			return outputs.Link(ctx, 0, limited)
 		},
 	})
+	require.NoError(t, err)
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
 	p.CloseAllInputs()
-	p.Start()
 
 	results := p.Outputs().SinkAt(ctx, 0)
 
@@ -72,16 +73,17 @@ func TestPipeline_TransformFilterLimit(t *testing.T) {
 }
 
 func TestPipeline_ParallelTransformBatch(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	parallelTransformStage := stages.ParallelTransformStage[int, int]{
 		Name:    "parallel-transform",
 		Buffer:  30,
 		Workers: 5,
-		Transformer: func(_ context.Context, x int) (*int, error) {
+		Transformer: func(_ context.Context, x int) (int, error) {
 			time.Sleep(5 * time.Millisecond)
 			result := x * 3
-			return &result, nil
+			return result, nil
 		},
 	}
 
@@ -92,11 +94,11 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 	}
 
 	// Pipeline: ParallelTransform -> Batch
-	p, _ := pipeline.NewPipeline[int, []int](ctx, pipeline.Config[int, []int]{
+	p, _, err := pipeline.NewPipeline[int, []int](ctx, pipeline.Config[int, []int]{
 		Name:             "test",
 		InputBufferSize:  30,
 		OutputBufferSize: 10,
-		Composer: func(composer pipeline.Composer[int, []int]) {
+		Composer: func(composer pipeline.Composer[int, []int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
@@ -104,13 +106,13 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 			transformed := parallelTransformStage.Create(ctx, inputs.At(0))
 			batched := batchStage.Create(ctx, transformed)
 
-			outputs.Link(ctx, 0, batched)
+			return outputs.Link(ctx, 0, batched)
 		},
 	})
+	require.NoError(t, err)
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30)
 	p.CloseAllInputs()
-	p.Start()
 
 	batches := p.Outputs().SinkAt(ctx, 0)
 
@@ -131,7 +133,8 @@ func TestPipeline_ParallelTransformBatch(t *testing.T) {
 }
 
 func TestPipeline_FanInTransformFanOut(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	fanInStage := stages.FanInStage[int]{
 		Name:   "fan-in",
@@ -141,9 +144,9 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 	transformStage := stages.TransformStage[int, int]{
 		Name:   "transform",
 		Buffer: 15,
-		Transformer: func(_ context.Context, x int) (*int, error) {
+		Transformer: func(_ context.Context, x int) (int, error) {
 			result := x * 2
-			return &result, nil
+			return result, nil
 		},
 	}
 
@@ -154,13 +157,13 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 	}
 
 	// Pipeline: FanIn -> Transform -> FanOut
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+	p, _, err := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
 		Name:             "test",
 		InputChannels:    3,
 		InputBufferSize:  5,
 		OutputChannels:   2,
 		OutputBufferSize: 15,
-		Composer: func(composer pipeline.Composer[int, int]) {
+		Composer: func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
@@ -169,9 +172,10 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 			transformed := transformStage.Create(ctx, merged)
 			fannedOut := fanOutStage.Create(ctx, transformed)
 
-			outputs.LinkAll(ctx, fannedOut)
+			return outputs.LinkAll(ctx, fannedOut)
 		},
 	})
+	require.NoError(t, err)
 
 	// Send values to each input channel
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5)
@@ -179,7 +183,6 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 	p.Inputs().Send(ctx, 2, 11, 12, 13, 14, 15)
 
 	p.CloseAllInputs()
-	p.Start()
 
 	require.NoError(t, p.Wait())
 
@@ -212,7 +215,8 @@ func TestPipeline_FanInTransformFanOut(t *testing.T) {
 }
 
 func TestPipeline_SplitTransformFanIn(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	splitStage := stages.SplitStage[int]{
 		Name:        "split",
@@ -226,27 +230,27 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 	transformStage1 := stages.TransformStage[int, int]{
 		Name:   "transform1",
 		Buffer: 6,
-		Transformer: func(_ context.Context, x int) (*int, error) {
+		Transformer: func(_ context.Context, x int) (int, error) {
 			result := x * 10
-			return &result, nil
+			return result, nil
 		},
 	}
 
 	transformStage2 := stages.TransformStage[int, int]{
 		Name:   "transform2",
 		Buffer: 6,
-		Transformer: func(_ context.Context, x int) (*int, error) {
+		Transformer: func(_ context.Context, x int) (int, error) {
 			result := x * 20
-			return &result, nil
+			return result, nil
 		},
 	}
 
 	transformStage3 := stages.TransformStage[int, int]{
 		Name:   "transform3",
 		Buffer: 6,
-		Transformer: func(_ context.Context, x int) (*int, error) {
+		Transformer: func(_ context.Context, x int) (int, error) {
 			result := x * 30
-			return &result, nil
+			return result, nil
 		},
 	}
 
@@ -256,11 +260,11 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 	}
 
 	// Pipeline: Split -> Transform (x3) -> FanIn
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+	p, _, err := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
 		Name:             "test",
 		InputBufferSize:  12,
 		OutputBufferSize: 12,
-		Composer: func(composer pipeline.Composer[int, int]) {
+		Composer: func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
@@ -273,13 +277,13 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 			transformed := pipeline.NewMultiChannelReceiver(transformed1, transformed2, transformed3)
 			fannedIn := fanInStage.Create(ctx, transformed)
 
-			outputs.Link(ctx, 0, fannedIn)
+			return outputs.Link(ctx, 0, fannedIn)
 		},
 	})
+	require.NoError(t, err)
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
 	p.CloseAllInputs()
-	p.Start()
 
 	results := p.Outputs().SinkAt(ctx, 0)
 
@@ -294,7 +298,8 @@ func TestPipeline_SplitTransformFanIn(t *testing.T) {
 }
 
 func TestPipeline_ComplexMultiStage(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	// Stage 1: Filter evens
 	filterStage1 := stages.FilterStage[int]{
@@ -309,9 +314,9 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 	transformStage1 := stages.TransformStage[int, int]{
 		Name:   "transform1",
 		Buffer: 50,
-		Transformer: func(_ context.Context, x int) (*int, error) {
+		Transformer: func(_ context.Context, x int) (int, error) {
 			result := x * 3
-			return &result, nil
+			return result, nil
 		},
 	}
 
@@ -326,12 +331,12 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 	transformStage2 := stages.TransformStage[[]int, int]{
 		Name:   "transform2",
 		Buffer: 20,
-		Transformer: func(_ context.Context, batch []int) (*int, error) {
+		Transformer: func(_ context.Context, batch []int) (int, error) {
 			sum := 0
 			for _, v := range batch {
 				sum += v
 			}
-			return &sum, nil
+			return sum, nil
 		},
 	}
 
@@ -352,11 +357,11 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 	}
 
 	// Complex pipeline: Filter -> Transform -> Batch -> Transform -> Filter -> Limit
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+	p, _, err := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
 		Name:             "test",
 		InputBufferSize:  50,
 		OutputBufferSize: 10,
-		Composer: func(composer pipeline.Composer[int, int]) {
+		Composer: func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
@@ -368,13 +373,13 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 			stage5 := filterStage2.Create(ctx, stage4)
 			out := limitStage.Create(ctx, stage5)
 
-			outputs.Link(ctx, 0, out)
+			return outputs.Link(ctx, 0, out)
 		},
 	})
+	require.NoError(t, err)
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50)
 	p.CloseAllInputs()
-	p.Start()
 
 	results := p.Outputs().SinkAt(ctx, 0)
 
@@ -388,7 +393,8 @@ func TestPipeline_ComplexMultiStage(t *testing.T) {
 }
 
 func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
+	defer cancel()
 
 	fanOutRRStage := stages.FanOutRoundRobinStage[int]{
 		Name:        "fan-out-rr",
@@ -400,10 +406,10 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 		Name:    "parallel-transform1",
 		Buffer:  5,
 		Workers: 2,
-		Transformer: func(_ context.Context, x int) (*int, error) {
+		Transformer: func(_ context.Context, x int) (int, error) {
 			time.Sleep(5 * time.Millisecond)
 			result := x * 100
-			return &result, nil
+			return result, nil
 		},
 	}
 
@@ -411,10 +417,10 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 		Name:    "parallel-transform2",
 		Buffer:  5,
 		Workers: 2,
-		Transformer: func(_ context.Context, x int) (*int, error) {
+		Transformer: func(_ context.Context, x int) (int, error) {
 			time.Sleep(5 * time.Millisecond)
 			result := x * 200
-			return &result, nil
+			return result, nil
 		},
 	}
 
@@ -422,10 +428,10 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 		Name:    "parallel-transform3",
 		Buffer:  5,
 		Workers: 2,
-		Transformer: func(_ context.Context, x int) (*int, error) {
+		Transformer: func(_ context.Context, x int) (int, error) {
 			time.Sleep(5 * time.Millisecond)
 			result := x * 300
-			return &result, nil
+			return result, nil
 		},
 	}
 
@@ -435,11 +441,11 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 	}
 
 	// Pipeline: FanOutRoundRobin -> ParallelTransform (on each branch) -> FanIn
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+	p, _, err := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
 		Name:             "test",
 		InputBufferSize:  15,
 		OutputBufferSize: 15,
-		Composer: func(composer pipeline.Composer[int, int]) {
+		Composer: func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
@@ -452,13 +458,13 @@ func TestPipeline_RoundRobinParallelProcessing(t *testing.T) {
 			processed := pipeline.NewMultiChannelReceiver(processed1, processed2, processed3)
 			out := fanInStage.Create(ctx, processed)
 
-			outputs.Link(ctx, 0, out)
+			return outputs.Link(ctx, 0, out)
 		},
 	})
+	require.NoError(t, err)
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
 	p.CloseAllInputs()
-	p.Start()
 
 	results := p.Outputs().SinkAt(ctx, 0)
 

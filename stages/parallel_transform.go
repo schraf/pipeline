@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime/trace"
 
@@ -20,12 +19,16 @@ import (
 
 type ParallelTransformStage[In any, Out any] struct {
 	Name        string
-	Buffer      int
-	Workers     int
+	Buffer      uint
+	Workers     uint
 	Transformer Transformer[In, Out]
 }
 
 func (s ParallelTransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan Out {
+	if s.Transformer == nil {
+		panic("ParallelTransformStage: Transformer must not be nil")
+	}
+
 	out := make(chan Out, s.Buffer)
 
 	ctx.Go(s.Name, func(pctx context.Context) error {
@@ -33,7 +36,7 @@ func (s ParallelTransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan 
 
 		group, gctx := errgroup.WithContext(pctx)
 
-		for i := 0; i < s.Workers; i++ {
+		for i := 0; i < int(s.Workers); i++ {
 			workerIndex := i
 			group.Go(func() error {
 				defer trace.StartRegion(pctx, fmt.Sprintf("%s_%d", s.Name, workerIndex)).End()
@@ -55,14 +58,11 @@ func (s ParallelTransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan 
 					if err != nil {
 						return err
 					}
-					if output == nil {
-						return errors.New("transformer returned nil output without error")
-					}
 
 					select {
 					case <-gctx.Done():
 						return gctx.Err()
-					case out <- *output:
+					case out <- output:
 					}
 				}
 			})

@@ -11,12 +11,12 @@ import (
 
 func TestFilterStage(t *testing.T) {
 	results := runStageTest(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-		func(composer pipeline.Composer[int, int]) {
+		func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
 
-			outputs.Link(ctx, 0, stages.FilterStage[int]{
+			return outputs.Link(ctx, 0, stages.FilterStage[int]{
 				Name:   "test-filter",
 				Buffer: 10,
 				Filter: func(_ context.Context, x int) (bool, error) {

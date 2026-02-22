@@ -22,12 +22,12 @@ func NewMultiChannelReceiver[T any, C InputChannel[T]](in ...C) MultiChannelRece
 	return MultiChannelReceiver[T](inputs)
 }
 
-func (m MultiChannelReceiver[T]) At(index int) (<-chan T, bool) {
-	if index < 0 || index >= len(m) {
-		return nil, false
+func (m MultiChannelReceiver[T]) At(index uint) <-chan T {
+	if int(index) >= len(m) {
+		return nil
 	}
 
-	return m[index], true
+	return m[index]
 }
 
 func (m MultiChannelReceiver[T]) Len() int {
@@ -44,9 +44,9 @@ func (m MultiChannelReceiver[T]) Iter() iter.Seq[<-chan T] {
 	}
 }
 
-func (m MultiChannelReceiver[T]) SinkAtIter(ctx context.Context, index int) iter.Seq[T] {
+func (m MultiChannelReceiver[T]) SinkAtIter(ctx context.Context, index uint) iter.Seq[T] {
 	return func(yield func(T) bool) {
-		if index < 0 || index >= len(m) {
+		if int(index) >= len(m) {
 			return
 		}
 
@@ -67,6 +67,6 @@ func (m MultiChannelReceiver[T]) SinkAtIter(ctx context.Context, index int) iter
 	}
 }
 
-func (m MultiChannelReceiver[T]) SinkAt(ctx context.Context, index int) []T {
+func (m MultiChannelReceiver[T]) SinkAt(ctx context.Context, index uint) []T {
 	return slices.Collect(m.SinkAtIter(ctx, index))
 }

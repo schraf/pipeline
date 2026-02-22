@@ -10,12 +10,12 @@ import (
 
 func TestBatchStage(t *testing.T) {
 	results := runStageTest(t, []int{1, 2, 3, 4, 5, 6, 7},
-		func(composer pipeline.Composer[int, []int]) {
+		func(composer pipeline.Composer[int, []int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
 
-			outputs.Link(ctx, 0, stages.BatchStage[int]{
+			return outputs.Link(ctx, 0, stages.BatchStage[int]{
 				Name:      "test-batch",
 				Buffer:    10,
 				BatchSize: 3,

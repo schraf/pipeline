@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"errors"
 
 	"github.com/schraf/pipeline/v3"
 )
@@ -13,37 +12,45 @@ import (
 // ║context is done or the input channel is closed.                            ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
 
-type Transformer[In any, Out any] func(context.Context, In) (*Out, error)
+type Transformer[In any, Out any] func(context.Context, In) (Out, error)
 
 type TransformStage[In any, Out any] struct {
 	Name        string
-	Buffer      int
+	Buffer      uint
 	Transformer Transformer[In, Out]
 }
 
 func (s TransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan Out {
+	if s.Transformer == nil {
+		panic("TransformStage: Transformer must not be nil")
+	}
+
 	out := make(chan Out, s.Buffer)
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
 
-		for input := range in {
-			output, err := s.Transformer(ctx, input)
-			if err != nil {
-				return err
-			}
-			if output == nil {
-				return errors.New("transformer returned nil output without error")
-			}
-
+		for {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case out <- *output:
+			case input, ok := <-in:
+				if !ok {
+					return nil
+				}
+
+				output, err := s.Transformer(ctx, input)
+				if err != nil {
+					return err
+				}
+
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case out <- output:
+				}
 			}
 		}
-
-		return nil
 	})
 
 	return out

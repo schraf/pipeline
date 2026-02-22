@@ -14,8 +14,8 @@ import (
 
 type LimitStage[T any] struct {
 	Name   string
-	Buffer int
-	Limit  int
+	Buffer uint
+	Limit  uint
 }
 
 func (s LimitStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan T {
@@ -24,14 +24,17 @@ func (s LimitStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan T {
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
 
-		if s.Limit <= 0 {
+		// Drain the input channel to unblock upstream goroutines.
+		if s.Limit == 0 {
+			for range in {
+			}
 			return nil
 		}
 
 		count := 0
 
 		for {
-			if count >= s.Limit {
+			if count >= int(s.Limit) {
 				break
 			}
 
@@ -51,6 +54,11 @@ func (s LimitStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan T {
 
 				count++
 			}
+		}
+
+		// Drain remaining items from the input channel to unblock
+		// upstream goroutines that may still be sending.
+		for range in {
 		}
 
 		return nil

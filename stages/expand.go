@@ -20,33 +20,44 @@ type Expander[In any, Out any] func(context.Context, In) iter.Seq2[Out, error]
 
 type ExpandStage[In any, Out any] struct {
 	Name     string
-	Buffer   int
+	Buffer   uint
 	Expander Expander[In, Out]
 }
 
 func (s ExpandStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan Out {
+	if s.Expander == nil {
+		panic("ExpandStage: Expander must not be nil")
+	}
+
 	out := make(chan Out, s.Buffer)
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
 
-		for input := range in {
-			seq := s.Expander(ctx, input)
-
-			for output, err := range seq {
-				if err != nil {
-					return err
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case input, ok := <-in:
+				if !ok {
+					return nil
 				}
 
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case out <- output:
+				seq := s.Expander(ctx, input)
+
+				for output, err := range seq {
+					if err != nil {
+						return err
+					}
+
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case out <- output:
+					}
 				}
 			}
 		}
-
-		return nil
 	})
 
 	return out

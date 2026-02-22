@@ -13,17 +13,17 @@ import (
 func TestSplitStage(t *testing.T) {
 	ctx := context.Background()
 
-	p, _ := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
+	p, _, err := pipeline.NewPipeline[int, int](ctx, pipeline.Config[int, int]{
 		Name:             "test",
 		InputBufferSize:  6,
 		OutputChannels:   3,
 		OutputBufferSize: 3,
-		Composer: func(composer pipeline.Composer[int, int]) {
+		Composer: func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
 
-			outputs.LinkAll(ctx, stages.SplitStage[int]{
+			return outputs.LinkAll(ctx, stages.SplitStage[int]{
 				Name:        "test-split",
 				OutputCount: 3,
 				Buffer:      3,
@@ -33,11 +33,11 @@ func TestSplitStage(t *testing.T) {
 			}.Create(ctx, inputs.At(0)))
 		},
 	})
+	require.NoError(t, err)
 
 	p.Inputs().Send(ctx, 0, 1, 2, 3, 4, 5, 6)
 
 	p.CloseAllInputs()
-	p.Start()
 
 	require.NoError(t, p.Wait())
 

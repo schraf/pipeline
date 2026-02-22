@@ -14,8 +14,8 @@ import (
 
 type BatchStage[T any] struct {
 	Name      string
-	Buffer    int
-	BatchSize int
+	Buffer    uint
+	BatchSize uint
 }
 
 func (s BatchStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan []T {
@@ -26,34 +26,41 @@ func (s BatchStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan []T {
 
 		batch := make([]T, 0, s.BatchSize)
 
-		for input := range in {
-			batch = append(batch, input)
-
-			if len(batch) >= s.BatchSize {
-				output := append([]T(nil), batch...)
-
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case out <- output:
-				}
-
-				batch = batch[:0]
-			}
-		}
-
-		// Process remaining items if any
-		if len(batch) > 0 {
-			output := append([]T(nil), batch...)
-
+		for {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case out <- output:
+			case input, ok := <-in:
+				if !ok {
+					// Process remaining items if any
+					if len(batch) > 0 {
+						output := append([]T(nil), batch...)
+
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case out <- output:
+						}
+					}
+
+					return nil
+				}
+
+				batch = append(batch, input)
+
+				if len(batch) >= int(s.BatchSize) {
+					output := append([]T(nil), batch...)
+
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case out <- output:
+					}
+
+					batch = batch[:0]
+				}
 			}
 		}
-
-		return nil
 	})
 
 	return out

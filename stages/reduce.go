@@ -18,12 +18,16 @@ type Reducer[T any, Acc any] func(context.Context, Acc, T) (Acc, error)
 
 type ReduceStage[T any, Acc any] struct {
 	Name    string
-	Buffer  int
+	Buffer  uint
 	Initial Acc
 	Reducer Reducer[T, Acc]
 }
 
 func (s ReduceStage[T, Acc]) Create(ctx pipeline.Context, in <-chan T) <-chan Acc {
+	if s.Reducer == nil {
+		panic("ReduceStage: Reducer must not be nil")
+	}
+
 	out := make(chan Acc, s.Buffer)
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
@@ -31,28 +35,28 @@ func (s ReduceStage[T, Acc]) Create(ctx pipeline.Context, in <-chan T) <-chan Ac
 
 		accumulator := s.Initial
 
-		for input := range in {
-			var err error
-			accumulator, err = s.Reducer(ctx, accumulator, input)
-			if err != nil {
-				return err
-			}
-
+		for {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			default:
-				// Continue processing
+			case input, ok := <-in:
+				if !ok {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case out <- accumulator:
+					}
+
+					return nil
+				}
+
+				var err error
+				accumulator, err = s.Reducer(ctx, accumulator, input)
+				if err != nil {
+					return err
+				}
 			}
 		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case out <- accumulator:
-		}
-
-		return nil
 	})
 
 	return out

@@ -11,19 +11,19 @@ import (
 
 func TestParallelTransformStage(t *testing.T) {
 	results := runStageTest(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
-		func(composer pipeline.Composer[int, int]) {
+		func(composer pipeline.Composer[int, int]) error {
 			ctx := composer.Context()
 			inputs := composer.Inputs()
 			outputs := composer.Outputs()
 
-			outputs.Link(ctx, 0, stages.ParallelTransformStage[int, int]{
+			return outputs.Link(ctx, 0, stages.ParallelTransformStage[int, int]{
 				Name:    "test-parallel-transform",
 				Buffer:  10,
 				Workers: 3,
-				Transformer: func(_ context.Context, x int) (*int, error) {
+				Transformer: func(_ context.Context, x int) (int, error) {
 					time.Sleep(10 * time.Millisecond)
 					result := x * 2
-					return &result, nil
+					return result, nil
 				},
 			}.Create(ctx, inputs.At(0)))
 		},

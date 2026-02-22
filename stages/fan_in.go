@@ -15,7 +15,7 @@ import (
 
 type FanInStage[T any] struct {
 	Name   string
-	Buffer int
+	Buffer uint
 }
 
 func (s FanInStage[T]) Create(ctx pipeline.Context, in pipeline.MultiChannelReceiver[T]) <-chan T {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/schraf/pipeline/v3"
+	"github.com/schraf/pipeline/v4"
 )
 
 // ╔═══════════════════════════════════════════════════════════════════════════════╗

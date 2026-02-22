@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"runtime/trace"
 
-	"github.com/schraf/pipeline/v3"
+	"github.com/schraf/pipeline/v4"
 	"golang.org/x/sync/errgroup"
 )
 

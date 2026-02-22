@@ -3,7 +3,7 @@ package stages
 import (
 	"context"
 
-	"github.com/schraf/pipeline/v3"
+	"github.com/schraf/pipeline/v4"
 )
 
 // ╔═══════════════════════════════════════════════════════════════════════════╗

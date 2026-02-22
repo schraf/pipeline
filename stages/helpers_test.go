@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/schraf/pipeline/v3"
+	"github.com/schraf/pipeline/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

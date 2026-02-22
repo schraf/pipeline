@@ -18,7 +18,7 @@ allowing for detailed performance analysis.
 ## Installation
 
 ```bash
-go get github.com/schraf/pipeline/v3
+go get github.com/schraf/pipeline/v4
 ```
 
 ## Usage
@@ -35,8 +35,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/schraf/pipeline/v3"
-	"github.com/schraf/pipeline/v3/stages"
+	"github.com/schraf/pipeline/v4"
+	"github.com/schraf/pipeline/v4/stages"
 )
 
 func main() {
@@ -105,7 +105,7 @@ The `Config` struct specifies the pipeline's basic parameters:
 
 ## Pipeline Stages
 
-Stages are located in the `github.com/schraf/pipeline/v3/stages` package.
+Stages are located in the `github.com/schraf/pipeline/v4/stages` package.
 
 ### Transform
 

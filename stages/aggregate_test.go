@@ -3,8 +3,8 @@ package stages_test
 import (
 	"testing"
 
-	"github.com/schraf/pipeline/v3"
-	"github.com/schraf/pipeline/v3/stages"
+	"github.com/schraf/pipeline/v4"
+	"github.com/schraf/pipeline/v4/stages"
 	"github.com/stretchr/testify/assert"
 )
 

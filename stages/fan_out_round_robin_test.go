@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/schraf/pipeline/v3"
-	"github.com/schraf/pipeline/v3/stages"
+	"github.com/schraf/pipeline/v4"
+	"github.com/schraf/pipeline/v4/stages"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

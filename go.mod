@@ -1,4 +1,4 @@
-module github.com/schraf/pipeline/v3
+module github.com/schraf/pipeline/v4
 
 go 1.24.0
 

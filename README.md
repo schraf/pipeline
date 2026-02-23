@@ -237,6 +237,27 @@ stage := stages.ReduceStage[int, int]{
 out := stage.Create(ctx, in)
 ```
 
+### WindowedReduce
+
+Processes values incrementally allowing intermediate results and state resets:
+
+```go
+stage := stages.WindowedReduceStage[int, int]{
+    Name:    "windowed-reduce",
+    Buffer:  1,
+    Initial: 0,
+    Reducer: func(ctx context.Context, acc int, val int) (int, int, bool, error) {
+        acc += val
+        // Emit and reset when sum >= 10
+        if acc >= 10 {
+            return 0, acc, true, nil
+        }
+        return acc, 0, false, nil
+    },
+}
+out := stage.Create(ctx, in)
+```
+
 ### Flatten
 
 Takes an input channel of slices and emits each element individually:

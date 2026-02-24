@@ -41,6 +41,15 @@ func (s TransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-ch
 
 				output, err := s.Transformer(ctx, input)
 				if err != nil {
+					if pipeline.IsDrainError(err) {
+						pipeline.DrainChannel(in)
+						return nil
+					}
+
+					if pipeline.IsSkipError(err) {
+						continue
+					}
+
 					return err
 				}
 

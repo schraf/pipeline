@@ -26,8 +26,7 @@ func (s LimitStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan T {
 
 		// Drain the input channel to unblock upstream goroutines.
 		if s.Limit == 0 {
-			for range in {
-			}
+			pipeline.DrainChannel(in)
 			return nil
 		}
 
@@ -58,8 +57,7 @@ func (s LimitStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan T {
 
 		// Drain remaining items from the input channel to unblock
 		// upstream goroutines that may still be sending.
-		for range in {
-		}
+		pipeline.DrainChannel(in)
 
 		return nil
 	})

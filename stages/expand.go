@@ -45,8 +45,19 @@ func (s ExpandStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan 
 
 				seq := s.Expander(ctx, input)
 
+				shouldDrain := false
+
 				for output, err := range seq {
 					if err != nil {
+						if pipeline.IsDrainError(err) {
+							shouldDrain = true
+							break
+						}
+
+						if pipeline.IsSkipError(err) {
+							break
+						}
+
 						return err
 					}
 
@@ -55,6 +66,11 @@ func (s ExpandStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan 
 						return ctx.Err()
 					case out <- output:
 					}
+				}
+
+				if shouldDrain {
+					pipeline.DrainChannel(in)
+					return nil
 				}
 			}
 		}

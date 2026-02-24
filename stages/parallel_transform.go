@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/trace"
+	"sync"
 
 	"github.com/schraf/pipeline/v4"
 	"golang.org/x/sync/errgroup"
@@ -36,6 +37,11 @@ func (s ParallelTransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan 
 
 		group, gctx := errgroup.WithContext(pctx)
 
+		// draining is closed when any worker receives a DrainError,
+		// signaling all workers to stop processing and drain the input.
+		draining := make(chan struct{})
+		drainOnce := sync.Once{}
+
 		for i := 0; i < int(s.Workers); i++ {
 			workerIndex := i
 			group.Go(func() error {
@@ -48,6 +54,9 @@ func (s ParallelTransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan 
 					select {
 					case <-gctx.Done():
 						return gctx.Err()
+					case <-draining:
+						pipeline.DrainChannel(in)
+						return nil
 					case input, ok = <-in:
 						if !ok {
 							return nil
@@ -56,12 +65,25 @@ func (s ParallelTransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan 
 
 					output, err := s.Transformer(gctx, input)
 					if err != nil {
+						if pipeline.IsDrainError(err) {
+							drainOnce.Do(func() { close(draining) })
+							pipeline.DrainChannel(in)
+							return nil
+						}
+
+						if pipeline.IsSkipError(err) {
+							continue
+						}
+
 						return err
 					}
 
 					select {
 					case <-gctx.Done():
 						return gctx.Err()
+					case <-draining:
+						pipeline.DrainChannel(in)
+						return nil
 					case out <- output:
 					}
 				}

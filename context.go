@@ -26,6 +26,10 @@ func (c Context) Go(name string, fn func(ctx context.Context) error) {
 		}()
 
 		if err := fn(c); err != nil {
+			if IsDrainError(err) || IsSkipError(err) {
+				return
+			}
+
 			c.err(err)
 		}
 	}()

@@ -75,7 +75,7 @@ func (s ParallelTransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan 
 							continue
 						}
 
-						return err
+						return pipeline.ErrorInStage(s.Name, err)
 					}
 
 					select {

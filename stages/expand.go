@@ -58,7 +58,7 @@ func (s ExpandStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan 
 							break
 						}
 
-						return err
+						return pipeline.ErrorInStage(s.Name, err)
 					}
 
 					select {

@@ -53,7 +53,7 @@ func (s ReduceStage[T, Acc]) Create(ctx pipeline.Context, in <-chan T) <-chan Ac
 				var err error
 				accumulator, err = s.Reducer(ctx, accumulator, input)
 				if err != nil {
-					return err
+					return pipeline.ErrorInStage(s.Name, err)
 				}
 			}
 		}

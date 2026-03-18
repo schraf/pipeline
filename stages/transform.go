@@ -50,7 +50,7 @@ func (s TransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-ch
 						continue
 					}
 
-					return err
+					return pipeline.ErrorInStage(s.Name, err)
 				}
 
 				select {

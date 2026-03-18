@@ -58,7 +58,7 @@ func (s WindowedReduceStage[T, Acc]) Create(ctx pipeline.Context, in <-chan T) <
 
 				nextAcc, output, emit, err := s.Reducer(ctx, accumulator, input)
 				if err != nil {
-					return err
+					return pipeline.ErrorInStage(s.Name, err)
 				}
 
 				if emit {

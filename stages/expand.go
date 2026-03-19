@@ -33,6 +33,7 @@ func (s ExpandStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan 
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
+		defer pipeline.DrainChannel(in)
 
 		for {
 			select {
@@ -58,7 +59,7 @@ func (s ExpandStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan 
 							break
 						}
 
-						return err
+						return pipeline.ErrorInStage(s.Name, err)
 					}
 
 					select {
@@ -69,7 +70,6 @@ func (s ExpandStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan 
 				}
 
 				if shouldDrain {
-					pipeline.DrainChannel(in)
 					return nil
 				}
 			}

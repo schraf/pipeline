@@ -362,3 +362,98 @@ func TestDrainError_DoesNotAffectSiblingPipelines(t *testing.T) {
 	// buffering, items 2 and 4 should be processed before 6 triggers drain.
 	assertUnorderedEqual(t, []int{20, 40}, evenResults)
 }
+
+// ╔════════════════════════════════════════════════════════════════════════════════╗
+// ║ FilterStage                                                                   ║
+// ╚════════════════════════════════════════════════════════════════════════════════╝
+
+func TestFilterStage_DrainError(t *testing.T) {
+	// Drain at 2
+	results := runStageTest(t, []int{1, 2, 3},
+		func(composer pipeline.Composer[int, int]) error {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
+
+			return outputs.Link(ctx, 0, stages.FilterStage[int]{
+				Name:   "test-filter-drain",
+				Buffer: 10,
+				Filter: func(_ context.Context, x int) (bool, error) {
+					if x == 2 {
+						return false, pipeline.Drain(errTest)
+					}
+					return true, nil
+				},
+			}.Create(ctx, inputs.At(0)))
+		},
+	)
+
+	expected := []int{1}
+	assert.Equal(t, expected, results)
+}
+
+// ╔════════════════════════════════════════════════════════════════════════════════╗
+// ║ ReduceStage                                                                   ║
+// ╚════════════════════════════════════════════════════════════════════════════════╝
+
+func TestReduceStage_DrainError(t *testing.T) {
+	// Sum numbers, but drain at 2
+	results := runStageTest(t, []int{1, 2, 3},
+		func(composer pipeline.Composer[int, int]) error {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
+
+			return outputs.Link(ctx, 0, stages.ReduceStage[int, int]{
+				Name:   "test-reduce-drain",
+				Buffer: 10,
+				Reducer: func(_ context.Context, acc, x int) (int, error) {
+					if x == 2 {
+						return acc, pipeline.Drain(errTest)
+					}
+					return acc + x, nil
+				},
+			}.Create(ctx, inputs.At(0)))
+		},
+	)
+
+	expected := []int{1}
+	assert.Equal(t, expected, results)
+}
+
+// ╔════════════════════════════════════════════════════════════════════════════════╗
+// ║ WindowedReduceStage                                                           ║
+// ╚════════════════════════════════════════════════════════════════════════════════╝
+
+func TestWindowedReduceStage_DrainError(t *testing.T) {
+	// Sum numbers, drain at 3
+	results := runStageTest(t, []int{1, 2, 3, 4, 5},
+		func(composer pipeline.Composer[int, int]) error {
+			ctx := composer.Context()
+			inputs := composer.Inputs()
+			outputs := composer.Outputs()
+
+			count := 0
+			return outputs.Link(ctx, 0, stages.WindowedReduceStage[int, int]{
+				Name:   "test-windowed-reduce-drain",
+				Buffer: 10,
+				Reducer: func(_ context.Context, acc, x int) (int, int, bool, error) {
+					if x == 3 {
+						return acc, 0, false, pipeline.Drain(errTest)
+					}
+					count++
+					newAcc := acc + x
+					if count%2 == 0 {
+						return 0, newAcc, true, nil
+					}
+					return newAcc, 0, false, nil
+				},
+			}.Create(ctx, inputs.At(0)))
+		},
+	)
+
+	// Items: 1, 2 (emit 3), 3 (drain)
+	// When 3 triggers drain, the current accumulator is 0 because the previous window was emitted and reset it.
+	expected := []int{3, 0}
+	assert.Equal(t, expected, results)
+}

@@ -39,6 +39,7 @@ func (s SplitStage[T]) Create(ctx pipeline.Context, in <-chan T) pipeline.MultiC
 				close(outputChannel)
 			}
 		}()
+		defer pipeline.DrainChannel(in)
 
 		for {
 			select {
@@ -51,7 +52,8 @@ func (s SplitStage[T]) Create(ctx pipeline.Context, in <-chan T) pipeline.MultiC
 
 				index := s.Selector(ctx, input)
 				if index < 0 || index >= len(outputs) {
-					return fmt.Errorf("SplitStage: selector returned invalid index %d (output count: %d)", index, len(outputs))
+					err := fmt.Errorf("SplitStage: selector returned invalid index %d (output count: %d)", index, len(outputs))
+					return pipeline.ErrorInStage(s.Name, err)
 				}
 				outputChannel := outputs[index]
 

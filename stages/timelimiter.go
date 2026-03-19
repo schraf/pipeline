@@ -23,6 +23,7 @@ func (s TimelimiterStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan T 
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
+		defer pipeline.DrainChannel(in)
 
 		timer := time.NewTimer(s.Duration)
 		defer timer.Stop()
@@ -32,7 +33,6 @@ func (s TimelimiterStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan T 
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-timer.C:
-				pipeline.DrainChannel(in)
 				return nil
 			case input, ok := <-in:
 				if !ok {

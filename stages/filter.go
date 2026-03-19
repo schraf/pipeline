@@ -29,6 +29,7 @@ func (s FilterStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan T {
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
+		defer pipeline.DrainChannel(in)
 
 		for {
 			select {
@@ -41,7 +42,11 @@ func (s FilterStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan T {
 
 				shouldForward, err := s.Filter(ctx, input)
 				if err != nil {
-					return err
+					if pipeline.IsDrainError(err) {
+						return nil
+					}
+
+					return pipeline.ErrorInStage(s.Name, err)
 				}
 
 				if !shouldForward {

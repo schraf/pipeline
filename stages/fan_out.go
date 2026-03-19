@@ -30,6 +30,7 @@ func (s FanOutStage[T]) Create(ctx pipeline.Context, in <-chan T) pipeline.Multi
 				close(outputChannel)
 			}
 		}()
+		defer pipeline.DrainChannel(in)
 
 		group, gctx := errgroup.WithContext(pctx)
 		group.SetLimit(int(s.OutputCount))

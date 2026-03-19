@@ -39,6 +39,7 @@ func (s WindowedReduceStage[T, Acc]) Create(ctx pipeline.Context, in <-chan T) <
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
+		defer pipeline.DrainChannel(in)
 
 		accumulator := s.Initial
 
@@ -58,7 +59,17 @@ func (s WindowedReduceStage[T, Acc]) Create(ctx pipeline.Context, in <-chan T) <
 
 				nextAcc, output, emit, err := s.Reducer(ctx, accumulator, input)
 				if err != nil {
-					return err
+					if pipeline.IsDrainError(err) {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case out <- accumulator:
+						}
+
+						return nil
+					}
+
+					return pipeline.ErrorInStage(s.Name, err)
 				}
 
 				if emit {

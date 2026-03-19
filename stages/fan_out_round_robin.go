@@ -30,6 +30,7 @@ func (s FanOutRoundRobinStage[T]) Create(ctx pipeline.Context, in <-chan T) pipe
 				close(outputChannel)
 			}
 		}()
+		defer pipeline.DrainChannel(in)
 
 		index := 0
 

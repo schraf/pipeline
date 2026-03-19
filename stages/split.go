@@ -39,6 +39,7 @@ func (s SplitStage[T]) Create(ctx pipeline.Context, in <-chan T) pipeline.MultiC
 				close(outputChannel)
 			}
 		}()
+		defer pipeline.DrainChannel(in)
 
 		for {
 			select {

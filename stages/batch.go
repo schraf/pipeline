@@ -23,6 +23,7 @@ func (s BatchStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan []T {
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)
+		defer pipeline.DrainChannel(in)
 
 		batch := make([]T, 0, s.BatchSize)
 

@@ -34,6 +34,7 @@ func (s ParallelTransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan 
 
 	ctx.Go(s.Name, func(pctx context.Context) error {
 		defer close(out)
+		defer pipeline.DrainChannel(in)
 
 		group, gctx := errgroup.WithContext(pctx)
 

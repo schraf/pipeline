@@ -23,6 +23,11 @@ func (s FanInStage[T]) Create(ctx pipeline.Context, in pipeline.MultiChannelRece
 
 	ctx.Go(s.Name, func(pctx context.Context) error {
 		defer close(out)
+		defer func() {
+			for inputChannel := range in.Iter() {
+				pipeline.DrainChannel(inputChannel)
+			}
+		}()
 
 		group, gctx := errgroup.WithContext(pctx)
 

@@ -80,7 +80,7 @@ type Telemetry struct {
 	collector    MetricsCollector
 	interval     time.Duration
 
-	mu     sync.RWMutex
+	lock   sync.RWMutex
 	probes []channelProbe
 
 	cancel   context.CancelFunc
@@ -114,8 +114,8 @@ func RegisterChannel[T any](t *Telemetry, name string, ch chan T) {
 		return
 	}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.lock.Lock()
+	defer t.lock.Unlock()
 
 	t.probes = append(t.probes, channelProbe{
 		name:  name,
@@ -136,8 +136,8 @@ func RegisterChannelWithCounters[T any](t *Telemetry, name string, ch chan T) (s
 	sends = &atomic.Int64{}
 	recvs = &atomic.Int64{}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.lock.Lock()
+	defer t.lock.Unlock()
 
 	t.probes = append(t.probes, channelProbe{
 		name:  name,
@@ -154,6 +154,20 @@ func RegisterChannelWithCounters[T any](t *Telemetry, name string, ch chan T) (s
 // context and will also stop when Stop is called.
 func (t *Telemetry) Start(ctx context.Context) {
 	if t == nil {
+		return
+	}
+
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	// Check if already stopped or already started
+	select {
+	case <-t.done:
+		return
+	default:
+	}
+
+	if t.cancel != nil {
 		return
 	}
 
@@ -185,9 +199,18 @@ func (t *Telemetry) Stop() {
 	}
 
 	t.stopOnce.Do(func() {
+		t.lock.Lock()
 		if t.cancel != nil {
 			t.cancel()
+		} else {
+			// Signal completion if never started to avoid hanging
+			select {
+			case <-t.done:
+			default:
+				close(t.done)
+			}
 		}
+		t.lock.Unlock()
 	})
 
 	<-t.done
@@ -205,8 +228,8 @@ func RegisterCounter(t *Telemetry, name string) (sends *atomic.Int64, recvs *ato
 	sends = &atomic.Int64{}
 	recvs = &atomic.Int64{}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.lock.Lock()
+	defer t.lock.Unlock()
 
 	t.probes = append(t.probes, channelProbe{
 		name:  name,
@@ -226,8 +249,8 @@ func (t *Telemetry) Snapshot() PipelineSnapshot {
 		return PipelineSnapshot{}
 	}
 
-	t.mu.RLock()
-	defer t.mu.RUnlock()
+	t.lock.RLock()
+	defer t.lock.RUnlock()
 
 	snap := PipelineSnapshot{
 		PipelineName: t.pipelineName,

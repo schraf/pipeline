@@ -13,25 +13,25 @@ import (
 
 // mockCollector records all snapshots delivered to it.
 type mockCollector struct {
-	mu        sync.Mutex
+	lock      sync.Mutex
 	snapshots []PipelineSnapshot
 }
 
 func (m *mockCollector) OnSnapshot(snap PipelineSnapshot) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	m.snapshots = append(m.snapshots, snap)
 }
 
 func (m *mockCollector) count() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	return len(m.snapshots)
 }
 
 func (m *mockCollector) latest() PipelineSnapshot {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	return m.snapshots[len(m.snapshots)-1]
 }
 
@@ -287,6 +287,29 @@ func TestStopIdempotent(t *testing.T) {
 	tel.Stop()
 	tel.Stop()
 	tel.Stop()
+}
+
+func TestStopBeforeStart_NoHang(t *testing.T) {
+	col := &mockCollector{}
+	tel := NewTelemetry("test", col, 50*time.Millisecond)
+
+	// Stop without calling Start; must not hang or panic.
+	done := make(chan struct{})
+	go func() {
+		tel.Stop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success
+	case <-time.After(time.Second):
+		t.Fatal("Stop hung when called before Start")
+	}
+
+	// Calling Start after Stop should be a no-op.
+	tel.Start(context.Background())
+	assert.Equal(t, 0, col.count(), "Collector should not receive any snapshots after Stop was called")
 }
 
 func TestStartContextCancellation(t *testing.T) {

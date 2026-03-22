@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"iter"
 )
 
@@ -48,6 +49,8 @@ func (m MultiChannelSender[T]) Link(ctx Context, index uint, in <-chan T) error 
 		return ErrInvalidChannel
 	}
 
+	sends, recvs := RegisterCounter(ctx.Telemetry(), fmt.Sprintf("link[%d]", index))
+
 	ctx.Go("link", func(ctx context.Context) error {
 		defer close(m[index])
 
@@ -60,8 +63,15 @@ func (m MultiChannelSender[T]) Link(ctx Context, index uint, in <-chan T) error 
 					return nil
 				}
 
+				if recvs != nil {
+					recvs.Add(1)
+				}
+
 				select {
 				case m[index] <- value:
+					if sends != nil {
+						sends.Add(1)
+					}
 				case <-ctx.Done():
 					return ctx.Err()
 				}
@@ -79,6 +89,8 @@ func (m MultiChannelSender[T]) LinkAll(ctx Context, in MultiChannelReceiver[T]) 
 
 	for index := 0; index < len(m); index++ {
 		idx := index
+		sends, recvs := RegisterCounter(ctx.Telemetry(), fmt.Sprintf("link_all[%d]", idx))
+
 		ctx.Go("link_all", func(ctx context.Context) error {
 			defer close(m[idx])
 
@@ -91,8 +103,15 @@ func (m MultiChannelSender[T]) LinkAll(ctx Context, in MultiChannelReceiver[T]) 
 						return nil
 					}
 
+					if recvs != nil {
+						recvs.Add(1)
+					}
+
 					select {
 					case m[idx] <- value:
+						if sends != nil {
+							sends.Add(1)
+						}
 					case <-ctx.Done():
 						return ctx.Err()
 					}

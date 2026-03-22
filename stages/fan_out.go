@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/schraf/pipeline/v4"
 	"golang.org/x/sync/errgroup"
@@ -22,6 +23,7 @@ func (s FanOutStage[T]) Create(ctx pipeline.Context, in <-chan T) pipeline.Multi
 	outputs := make([]chan T, s.OutputCount)
 	for i := range outputs {
 		outputs[i] = make(chan T, s.Buffer)
+		pipeline.RegisterChannel(ctx.Telemetry(), fmt.Sprintf("%s[%d]", s.Name, i), outputs[i])
 	}
 
 	ctx.Go(s.Name, func(pctx context.Context) error {

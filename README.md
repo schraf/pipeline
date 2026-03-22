@@ -313,6 +313,39 @@ stage := stages.AggregateStage[int]{
 out := stage.Create(ctx, in) // out is <-chan []int
 ```
 
+## Telemetry
+
+Pipelines support opt-in telemetry for monitoring channel throughput and buffer utilization, useful for identifying bottlenecks. Enable it by setting `MetricsCollector` in the pipeline config:
+
+```go
+cfg := pipeline.Config[int, int]{
+    Name:            "example",
+    InputBufferSize: 50,
+    MetricsCollector: &pipeline.LogCollector{
+        Logger: slog.New(slog.NewJSONHandler(os.Stderr, nil)),
+        Level:  slog.LevelInfo,
+    },
+    MetricsInterval: 500 * time.Millisecond,
+    Composer: func(c pipeline.Composer[int, int]) error {
+        // stages automatically register their channels
+        out := transformStage.Create(c.Context(), c.Inputs().At(0))
+        return c.Outputs().Link(c.Context(), 0, out)
+    },
+}
+```
+
+The `LogCollector` emits one structured `slog` message per channel per tick with `len`, `cap`, `utilization`, and throughput counters. A consistently full channel upstream of a stage with an empty channel downstream indicates a bottleneck.
+
+Implement the `MetricsCollector` interface to send telemetry to a custom backend:
+
+```go
+type MetricsCollector interface {
+    OnSnapshot(PipelineSnapshot)
+}
+```
+
+When `MetricsCollector` is nil (the default), no telemetry code runs and there is zero overhead.
+
 ## Error Handling
 
 The pipeline automatically cancels all stages when an error occurs. The first error encountered is captured and returned by `Wait()`:

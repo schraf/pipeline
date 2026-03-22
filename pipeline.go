@@ -10,6 +10,7 @@ import (
 	"runtime/trace"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -48,6 +49,7 @@ type Pipeline[In any, Out any] struct {
 	err        error
 	inputs     []chan In
 	outputs    []chan Out
+	telemetry  *Telemetry
 }
 
 // NewPipeline creates a new Pipeline and a derived context for coordinating
@@ -81,12 +83,30 @@ func NewPipeline[In any, Out any](ctx context.Context, cfg Config[In, Out]) (*Pi
 		outputs[index] = make(chan Out, cfg.OutputBufferSize)
 	}
 
+	var telemetry *Telemetry
+	if cfg.MetricsCollector != nil {
+		interval := cfg.MetricsInterval
+		if interval <= 0 {
+			interval = time.Second
+		}
+
+		telemetry = NewTelemetry(cfg.Name, cfg.MetricsCollector, interval)
+
+		for i, ch := range inputs {
+			RegisterChannel(telemetry, fmt.Sprintf("input[%d]", i), ch)
+		}
+		for i, ch := range outputs {
+			RegisterChannel(telemetry, fmt.Sprintf("output[%d]", i), ch)
+		}
+	}
+
 	pipeline := &Pipeline[In, Out]{
-		cancel:  cancel,
-		ctx:     ctx,
-		task:    task,
-		inputs:  inputs,
-		outputs: outputs,
+		cancel:    cancel,
+		ctx:       ctx,
+		task:      task,
+		inputs:    inputs,
+		outputs:   outputs,
+		telemetry: telemetry,
 	}
 
 	pipeline.state.Store(stateStarted)
@@ -98,7 +118,14 @@ func NewPipeline[In any, Out any](ctx context.Context, cfg Config[In, Out]) (*Pi
 	}); err != nil {
 		cancel(err)
 		task.End()
+		if telemetry != nil {
+			telemetry.Stop()
+		}
 		return nil, ctx, fmt.Errorf("pipeline: composer failed: %w", err)
+	}
+
+	if telemetry != nil {
+		telemetry.Start(ctx)
 	}
 
 	return pipeline, ctx, nil
@@ -106,9 +133,10 @@ func NewPipeline[In any, Out any](ctx context.Context, cfg Config[In, Out]) (*Pi
 
 func (p *Pipeline[In, Out]) context() Context {
 	return Context{
-		Context: p.ctx,
-		group:   &p.group,
-		err:     p.setError,
+		Context:   p.ctx,
+		group:     &p.group,
+		err:       p.setError,
+		telemetry: p.telemetry,
 	}
 }
 
@@ -141,8 +169,21 @@ func (p *Pipeline[In, Out]) Wait() error {
 	defer p.cancel(nil)
 	defer p.task.End()
 	defer p.state.Store(stateDone)
+
 	p.group.Wait()
+
+	if p.telemetry != nil {
+		p.telemetry.Stop()
+	}
+
 	return p.err
+}
+
+// Telemetry returns the pipeline's telemetry registry, or nil when
+// telemetry is disabled. This can be used to register additional channels
+// or take on-demand snapshots.
+func (p *Pipeline[In, Out]) Telemetry() *Telemetry {
+	return p.telemetry
 }
 
 func (p *Pipeline[In, Out]) setError(err error) {

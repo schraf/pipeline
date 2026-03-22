@@ -18,6 +18,7 @@ type AggregateStage[T any] struct {
 
 func (s AggregateStage[T]) Create(ctx pipeline.Context, in <-chan T) <-chan []T {
 	out := make(chan []T, s.Buffer)
+	pipeline.RegisterChannel(ctx.Telemetry(), s.Name, out)
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)

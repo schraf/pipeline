@@ -20,6 +20,7 @@ type FanInStage[T any] struct {
 
 func (s FanInStage[T]) Create(ctx pipeline.Context, in pipeline.MultiChannelReceiver[T]) <-chan T {
 	out := make(chan T, s.Buffer)
+	pipeline.RegisterChannel(ctx.Telemetry(), s.Name, out)
 
 	ctx.Go(s.Name, func(pctx context.Context) error {
 		defer close(out)

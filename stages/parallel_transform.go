@@ -31,6 +31,7 @@ func (s ParallelTransformStage[In, Out]) Create(ctx pipeline.Context, in <-chan 
 	}
 
 	out := make(chan Out, s.Buffer)
+	pipeline.RegisterChannel(ctx.Telemetry(), s.Name, out)
 
 	ctx.Go(s.Name, func(pctx context.Context) error {
 		defer close(out)

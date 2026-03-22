@@ -30,6 +30,7 @@ func (s ExpandStage[In, Out]) Create(ctx pipeline.Context, in <-chan In) <-chan 
 	}
 
 	out := make(chan Out, s.Buffer)
+	pipeline.RegisterChannel(ctx.Telemetry(), s.Name, out)
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)

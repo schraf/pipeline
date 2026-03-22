@@ -36,6 +36,7 @@ func (s WindowedReduceStage[T, Acc]) Create(ctx pipeline.Context, in <-chan T) <
 	}
 
 	out := make(chan Acc, s.Buffer)
+	pipeline.RegisterChannel(ctx.Telemetry(), s.Name, out)
 
 	ctx.Go(s.Name, func(ctx context.Context) error {
 		defer close(out)

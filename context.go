@@ -9,9 +9,15 @@ import (
 
 type Context struct {
 	context.Context
-	group *sync.WaitGroup
-	err   func(error)
+	group     *sync.WaitGroup
+	err       func(error)
+	telemetry *Telemetry
 }
+
+// Telemetry returns the pipeline's telemetry registry, or nil when
+// telemetry is disabled. Stage authors can use this to register their
+// internal channels for buffer utilization monitoring.
+func (c Context) Telemetry() *Telemetry { return c.telemetry }
 
 func (c Context) Go(name string, fn func(ctx context.Context) error) {
 	c.group.Add(1)
